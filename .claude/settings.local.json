@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/c/Program Files/GitHub CLI/gh.exe\" extension install yahsan2/gh-sub-issue)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(find C:/Users/omarb/OneDrive/Bureau/Protoype -maxdepth 2 -type f -name *.json -o -name *.config.* -o -name *.ts -o -name *.tsx -o -name *.js -o -name *.jsx)",
+      "Bash(find /c/Users/omarb/OneDrive/Bureau/Protoype -name *.ts -o -name *.tsx -o -name *.js)"
+    ]
+  }
+}
