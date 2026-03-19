@@ -1,22 +1,65 @@
 // TON payment deeplink builder
 // Format: ton://transfer/<address>?amount=<nanotons>&text=<comment>
 
-const TON_TO_NANO = 1_000_000_000n
+import type { PaymentRequest } from "@/types"
 
-export function buildTonPaymentLink({
-  address,
-  amountTon,
-  comment,
-}: {
-  address: string
-  amountTon: number
-  comment: string
-}): string {
-  const nanotons = BigInt(Math.round(amountTon * Number(TON_TO_NANO)))
-  const encoded = encodeURIComponent(comment)
-  return `ton://transfer/${address}?amount=${nanotons}&text=${encoded}`
+const TON_TO_NANO = 1_000_000_000
+
+/**
+ * Convert TON to nanotons (1 TON = 1_000_000_000 nanotons).
+ */
+export function tonToNano(ton: number): bigint {
+  return BigInt(Math.round(ton * TON_TO_NANO))
 }
 
+/**
+ * Build a TON deeplink payment URL.
+ * Format: ton://transfer/<address>?amount=<nanotons>&text=<comment>
+ */
+export function buildTonPaymentLink(params: {
+  toAddress: string   // recipient TON address (raw or user-friendly)
+  amountTon: number   // amount in TON (not nanotons)
+  comment?: string    // optional comment (e.g. "SatSplit: Dinner - Alice")
+}): string {
+  const nanotons = tonToNano(params.amountTon).toString()
+  const parts = [`ton://transfer/${params.toAddress}?amount=${nanotons}`]
+  if (params.comment) {
+    parts.push(`text=${encodeURIComponent(params.comment)}`)
+  }
+  return parts.join("&")
+}
+
+/**
+ * Build a PaymentRequest record (without id) for a TON payment.
+ */
+export function buildPaymentRequest(params: {
+  splitSessionId: string
+  participantId: string
+  amount: number      // in fiat (EUR/USD)
+  amountTon: number   // in TON
+  toAddress: string
+  comment?: string
+}): Omit<PaymentRequest, "id"> {
+  const paymentLink = buildTonPaymentLink({
+    toAddress: params.toAddress,
+    amountTon: params.amountTon,
+    comment: params.comment,
+  })
+
+  return {
+    splitSessionId: params.splitSessionId,
+    participantId: params.participantId,
+    amount: params.amount,
+    amountNative: params.amountTon,
+    status: "pending",
+    paymentLink,
+    rail: "ton",
+  }
+}
+
+/**
+ * Legacy helper — kept for backward compat with poller.ts.
+ */
 export function buildSplitComment(splitId: string, participantId: string): string {
   return `SatSplit:${splitId.slice(0, 8)}:${participantId.slice(0, 8)}`
 }

@@ -18,7 +18,17 @@ export function equalSplit(total: number, count: number): number[] {
   return amounts
 }
 
-// Itemized split — participant IDs assigned per item
+/**
+ * calculateEqualSplit — returns the per-person share (first person absorbs rounding).
+ * Alias used by API routes.
+ */
+export function calculateEqualSplit(total: number, participantCount: number): number {
+  const amounts = equalSplit(total, participantCount)
+  // Return the base share (last element, unaffected by rounding remainder)
+  return amounts[amounts.length - 1]
+}
+
+// Itemized split — participant IDs assigned per item (array-based assignments)
 export function itemizedSplit(
   items: ReceiptItem[],
   assignments: Array<{ itemIndex: number; participantIds: string[] }>
@@ -35,6 +45,46 @@ export function itemizedSplit(
   }
 
   return totals
+}
+
+/**
+ * calculateItemizedSplit — record-based assignments.
+ * assignments: { participantId: [itemName, ...] }
+ * Matches items by name.
+ */
+export function calculateItemizedSplit(
+  items: ReceiptItem[],
+  assignments: Record<string, string[]>
+): Record<string, number> {
+  const totals: Record<string, number> = {}
+
+  // Build a map: itemName -> list of participantIds assigned to it
+  const itemToParticipants: Record<string, string[]> = {}
+  for (const [participantId, itemNames] of Object.entries(assignments)) {
+    for (const itemName of itemNames) {
+      if (!itemToParticipants[itemName]) itemToParticipants[itemName] = []
+      itemToParticipants[itemName].push(participantId)
+    }
+  }
+
+  for (const item of items) {
+    const participants = itemToParticipants[item.name]
+    if (!participants || participants.length === 0) continue
+    const share = round2(item.totalPrice / participants.length)
+    for (const pid of participants) {
+      totals[pid] = round2((totals[pid] ?? 0) + share)
+    }
+  }
+
+  return totals
+}
+
+/**
+ * validateSplit — returns true if sum of amounts ≈ total (within 0.01 rounding tolerance).
+ */
+export function validateSplit(amounts: Record<string, number>, total: number): boolean {
+  const sum = Object.values(amounts).reduce((a, b) => a + b, 0)
+  return Math.abs(round2(sum) - round2(total)) < 0.01
 }
 
 // Custom split — validate that amounts sum to total

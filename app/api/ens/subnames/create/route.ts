@@ -1,28 +1,72 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createSubname, deriveSubname } from "@/lib/ens/subnames"
+import { createSubname, checkSubnameAvailable } from "@/lib/ens/subnames"
+
+// Label must be alphanumeric + hyphens, 3-30 chars
+const LABEL_RE = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$|^[a-z0-9]{3,30}$/
+
+function isValidLabel(label: string): boolean {
+  return LABEL_RE.test(label)
+}
 
 export async function POST(req: NextRequest) {
+  let body: unknown
   try {
-    const body = await req.json()
-    const { displayName, evmAddress, tonAddress, telegramHandle } = body
-
-    if (!displayName || !evmAddress) {
-      return NextResponse.json({ success: false, error: "displayName and evmAddress required" }, { status: 400 })
-    }
-
-    const name = deriveSubname(displayName)
-    const textRecords: Record<string, string> = {}
-    if (tonAddress) textRecords["app.satsplit.ton-address"] = tonAddress
-    if (telegramHandle) textRecords["app.satsplit.telegram"] = telegramHandle
-
-    await createSubname({ name, address: evmAddress, textRecords })
-
-    const parent = process.env.ENS_PARENT_NAME ?? "satsplit.eth"
-    return NextResponse.json({
-      success: true,
-      data: { subname: `${name}.${parent}` },
-    })
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 })
+    body = await req.json()
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Invalid JSON body" },
+      { status: 400 }
+    )
   }
+
+  const { label, evmAddress, tonAddress, telegramHandle } = body as Record<
+    string,
+    string | undefined
+  >
+
+  if (!label || !evmAddress) {
+    return NextResponse.json(
+      { success: false, error: "label and evmAddress are required" },
+      { status: 400 }
+    )
+  }
+
+  // Normalize label to lowercase
+  const normalizedLabel = label.toLowerCase()
+
+  if (!isValidLabel(normalizedLabel)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "label must be 3-30 characters, alphanumeric and hyphens only, cannot start or end with a hyphen",
+      },
+      { status: 400 }
+    )
+  }
+
+  // Check availability
+  const available = await checkSubnameAvailable(normalizedLabel)
+  if (!available) {
+    return NextResponse.json(
+      { success: false, error: `${normalizedLabel}.satsplit.eth is already taken` },
+      { status: 409 }
+    )
+  }
+
+  const result = await createSubname({
+    label: normalizedLabel,
+    evmAddress,
+    tonAddress,
+    telegramHandle,
+  })
+
+  if (!result.success) {
+    return NextResponse.json(
+      { success: false, error: result.error ?? "Failed to create subname" },
+      { status: 500 }
+    )
+  }
+
+  return NextResponse.json({ success: true, data: { subname: result.subname } })
 }
