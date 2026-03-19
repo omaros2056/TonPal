@@ -81,6 +81,16 @@ create index if not exists idx_payment_requests_participant on payment_requests(
 create index if not exists idx_payment_receipts_request on payment_receipts(payment_request_id);
 create index if not exists idx_xrpl_checks_session on xrpl_checks(split_session_id);
 
+-- ─── xrpl_checks — additional columns (task-007 migration) ──────────────────
+-- Add sender/destination address and amount_drops columns if not already present
+alter table xrpl_checks
+  add column if not exists sender_address      text,
+  add column if not exists destination_address text,
+  add column if not exists amount_drops        text;
+
+-- Additional index for status lookups by payment_request_id
+create index if not exists idx_xrpl_checks_payment_request on xrpl_checks(payment_request_id);
+
 -- ─── Real-time (enable for status board) ─────────────────────────────────────
 alter publication supabase_realtime add table payment_requests;
 alter publication supabase_realtime add table payment_receipts;

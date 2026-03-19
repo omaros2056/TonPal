@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react"
 import Link from "next/link"
+import PremiumGate from "@/components/premium-gate"
 
 type Tab = "photo" | "text"
 type Step = "input" | "analyzing" | "preview"
@@ -19,6 +20,8 @@ export default function SplitPage() {
   const [step, setStep] = useState<Step>("input")
   const [description, setDescription] = useState("")
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [showPremiumGate, setShowPremiumGate] = useState(false)
+  const [isPremium, setIsPremium] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -40,6 +43,7 @@ export default function SplitPage() {
     setStep("input")
     setPreviewImage(null)
     setDescription("")
+    setShowPremiumGate(false)
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
@@ -120,12 +124,30 @@ export default function SplitPage() {
                   onChange={handlePhotoSelect}
                 />
                 {previewImage && (
-                  <button
-                    onClick={handleAnalyze}
-                    className="w-full py-4 rounded-2xl bg-blue-500 text-white font-semibold text-base active:scale-95 transition-transform"
-                  >
-                    Analyze receipt →
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleAnalyze}
+                      className="w-full py-4 rounded-2xl bg-blue-500 text-white font-semibold text-base active:scale-95 transition-transform"
+                    >
+                      {isPremium ? "Analyze receipt (Premium) →" : "Analyze receipt →"}
+                    </button>
+                    {!isPremium && !showPremiumGate && (
+                      <button
+                        onClick={() => setShowPremiumGate(true)}
+                        className="w-full text-xs text-indigo-500 underline underline-offset-2 py-1"
+                      >
+                        ✨ Upgrade to Premium — unlimited items + higher accuracy
+                      </button>
+                    )}
+                    {showPremiumGate && !isPremium && (
+                      <PremiumGate
+                        onUnlocked={() => {
+                          setIsPremium(true)
+                          setShowPremiumGate(false)
+                        }}
+                      />
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -140,13 +162,31 @@ export default function SplitPage() {
                   rows={4}
                   className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-gray-400"
                 />
-                <button
-                  onClick={handleAnalyze}
-                  disabled={description.trim().length < 5}
-                  className="w-full py-4 rounded-2xl bg-blue-500 text-white font-semibold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Create split →
-                </button>
+                <div className="space-y-2">
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={description.trim().length < 5}
+                    className="w-full py-4 rounded-2xl bg-blue-500 text-white font-semibold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isPremium ? "Create split (Premium) →" : "Create split →"}
+                  </button>
+                  {!isPremium && !showPremiumGate && (
+                    <button
+                      onClick={() => setShowPremiumGate(true)}
+                      className="w-full text-xs text-indigo-500 underline underline-offset-2 py-1"
+                    >
+                      ✨ Upgrade to Premium — unlimited items + higher accuracy
+                    </button>
+                  )}
+                  {showPremiumGate && !isPremium && (
+                    <PremiumGate
+                      onUnlocked={() => {
+                        setIsPremium(true)
+                        setShowPremiumGate(false)
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             )}
           </>
