@@ -1,0 +1,16 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "regions": ["cdg1"],
+  "crons": [
+    {
+      "path": "/api/payments/confirm",
+      "schedule": "*/30 * * * *"
+    }
+  ],
+  "env": {
+    "NEXT_TELEMETRY_DISABLED": "1"
+  }
+}
