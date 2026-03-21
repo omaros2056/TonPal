@@ -17,9 +17,7 @@ import {
 } from "./status-board"
 import { buildTelegramWalletLink } from "@/lib/rails/ton/payment-link"
 
-if (!process.env.TELEGRAM_BOT_TOKEN) {
-  throw new Error("TELEGRAM_BOT_TOKEN is not set")
-}
+// Token check is deferred to runtime (not build time) — see getBot() below
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://satsplit.app"
 
@@ -613,17 +611,28 @@ async function sendItemAssignmentPrompt(
   )
 }
 
-// ─── Singleton + exports ──────────────────────────────────────────────────────
+// ─── Lazy singleton — only created at runtime, never at build time ────────────
 
-export const bot = createBot(process.env.TELEGRAM_BOT_TOKEN)
+let _bot: Bot | null = null
+
+function getBot(): Bot {
+  if (!_bot) {
+    const token = process.env.TELEGRAM_BOT_TOKEN
+    if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set")
+    _bot = createBot(token)
+  }
+  return _bot
+}
 
 export async function startBot(): Promise<void> {
   console.log("[bot] Starting in long-polling mode...")
-  await bot.start({
+  await getBot().start({
     onStart: (info) => {
       console.log(`[bot] Listening as @${info.username}`)
     },
   })
 }
 
-export const handleWebhook = webhookCallback(bot, "std/http")
+export async function handleWebhook(req: Request): Promise<Response> {
+  return webhookCallback(getBot(), "std/http")(req)
+}
