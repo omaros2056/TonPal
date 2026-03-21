@@ -107,9 +107,10 @@ function buildReceiptSummaryText(scan: ReceiptScan): string {
 }
 
 // ─── TON address validator ────────────────────────────────────────────────────
-// User-friendly TON addresses: 48 base64url chars, start with EQ / UQ / kQ / kf
+// User-friendly TON addresses are always 48 base64url characters.
+// Mainnet: EQ… / UQ… Testnet: kQ… / 0Q… — allow any 2-char prefix + 46 base64url chars.
 function isValidTonAddress(address: string): boolean {
-  return /^[EUk][Qq0-9][A-Za-z0-9_-]{46}$/.test(address)
+  return /^[A-Za-z0-9_-]{48}$/.test(address)
 }
 
 // ─── Supabase helpers (shared) ────────────────────────────────────────────────
@@ -141,22 +142,19 @@ async function sendPaymentDM(
   const kb = new InlineKeyboard()
 
   if (toAddress) {
-    // Tonkeeper HTTPS link — works as a URL button, opens with address + amount + memo prefilled
+    // Tonkeeper HTTPS link — opens Tonkeeper directly with address + amount + memo prefilled.
+    // Requires Tonkeeper installed; for testnet enable Settings → Dev tools → Switch to testnet.
     const tonkeeperLink = buildTonkeeperPaymentLink({ toAddress, amountTon, comment })
-    kb.url("💎 Pay with Tonkeeper", tonkeeperLink).row()
+    kb.url("💎 Pay with Tonkeeper", tonkeeperLink)
 
-    // ton:// universal deeplink — opens Telegram Wallet (or any TON wallet) with everything prefilled
-    const tonDeepLink = `ton://transfer/${toAddress}?amount=${nanotons}&text=${encodeURIComponent(comment)}`
-    kb.url("💰 Pay with TON Wallet", tonDeepLink)
+    // TON Space (Telegram's built-in wallet) — only works reliably on mainnet.
+    if (!isTestnet) {
+      const tonSpaceLink = `https://t.me/wallet?startapp=transfer_${toAddress}_${nanotons}`
+      kb.row().url("💬 Pay with Telegram Wallet", tonSpaceLink)
+    }
   } else {
-    // Fallback: Telegram Wallet without address (mainnet only)
-    const walletParams = new URLSearchParams({
-      startattach: "pay",
-      amount: nanotons.toString(),
-      currency: "TON",
-      comment,
-    })
-    kb.url("💰 Telegram Wallet", `https://t.me/wallet?${walletParams.toString()}`)
+    // No address set — open Telegram Wallet home so user can still initiate a transfer manually
+    kb.url("💬 Open Telegram Wallet", "https://t.me/wallet")
   }
 
   const addrDisplay = toAddress
@@ -164,7 +162,7 @@ async function sendPaymentDM(
     : `\n⚠️ ${i("No wallet address set — organizer hasn't registered a wallet yet.")}`
 
   const testnetNote = isTestnet
-    ? `\n\n${i("⚠️ Testnet — switch Tonkeeper to testnet mode (Settings → Dev tools)")}`
+    ? `\n\n${i("⚠️ Testnet — use Tonkeeper in testnet mode (Settings → Dev tools → Switch to testnet)")}`
     : ""
 
   await ctx.reply(
@@ -173,7 +171,7 @@ async function sendPaymentDM(
     `(${split.currency}${entry.amount.toFixed(2)}) for ${b(split.merchant)}.` +
     addrDisplay +
     testnetNote +
-    `\n\nTap below to pay:`,
+    `\n\nChoose your wallet to sign & pay:`,
     { ...HTML, reply_markup: kb }
   )
 }
@@ -290,7 +288,7 @@ export function createBot(token: string): Bot {
         `💼 Register your TON wallet so TonPal knows where to send payments.\n\n` +
         `Usage:\n${code("/setwallet YOUR_TON_ADDRESS")}\n\n` +
         `Example:\n${code("/setwallet EQD4FPq-PRDieyQKkizFTRtSDyucUIqrj0v_zXJmqaDp6_0t")}\n\n` +
-        `${i("Your address starts with EQ, UQ, or kQ and is 48 characters long.")}`,
+        `${i("Mainnet: starts with EQ/UQ — Testnet: starts with kQ/0Q — always 48 characters.")}`,
         HTML
       )
       return
@@ -299,7 +297,7 @@ export function createBot(token: string): Bot {
     if (!isValidTonAddress(address)) {
       await ctx.reply(
         `❌ That doesn't look like a valid TON address.\n\n` +
-        `It should start with ${code("EQ")}, ${code("UQ")}, or ${code("kQ")} and be 48 characters long.\n\n` +
+        `It should be ${b("48 characters")} long (mainnet: starts with ${code("EQ")}/${code("UQ")}, testnet: ${code("kQ")}/${code("0Q")}).\n\n` +
         `${i("You can copy it from Tonkeeper or any TON wallet app.")}`,
         HTML
       )
@@ -349,7 +347,7 @@ export function createBot(token: string): Bot {
         await ctx.reply(
           `💼 You haven't registered a wallet yet.\n\n` +
           `Use:\n${code("/setwallet YOUR_TON_ADDRESS")}\n\n` +
-          `${i("Your address starts with EQ, UQ, or kQ — copy it from Tonkeeper or any TON wallet.")}`,
+          `${i("Mainnet: EQ/UQ… — Testnet: kQ/0Q… — always 48 characters. Copy from Tonkeeper.")}`,
           HTML
         )
         return
