@@ -31,17 +31,20 @@ interface Split {
   handle: string
   amount: number
   payLink: string
+  deepLink?: string
 }
 
 // ─── Tonkeeper link ───────────────────────────────────────────────────────────
 
 function buildPayLink(amount: number, splitId: string): string {
-  const address =
-    process.env.NEXT_PUBLIC_TON_COLLECTION_ADDRESS ??
-    "UQDrjGwR-gN8b5wXdAqDrV5RUKnxZvbUk55rFe-8bfvb8xJt"
   const nanotons = Math.round(amount * 1_000_000_000).toString()
-  const comment = encodeURIComponent(`TonPal-${splitId}`)
-  return `https://app.tonkeeper.com/transfer/${address}?amount=${nanotons}&text=${comment}`
+  const params = new URLSearchParams({
+    startattach: "pay",
+    amount: nanotons,
+    currency: "TON",
+    comment: `TonPal-${splitId}`,
+  })
+  return `https://t.me/wallet?${params.toString()}`
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -109,24 +112,24 @@ export default function SplitPage() {
   }
 
   // ── Compute split ────────────────────────────────────────────────────────────
-  function handleComputeSplit() {
+  async function handleComputeSplit() {
     if (!receipt) return
-    const splitId = `${Date.now()}`
+    const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
     const validHandles = participants.map((p) =>
       p.handle.startsWith("@") ? p.handle : `@${p.handle}`
     )
 
     let splits: Split[] = []
+    const tempId = `${Date.now()}`
 
     if (splitMode === "equal") {
       const perPerson = receipt.total / validHandles.length
       splits = validHandles.map((handle) => ({
         handle,
         amount: perPerson,
-        payLink: buildPayLink(perPerson, splitId),
+        payLink: buildPayLink(perPerson, tempId),
       }))
     } else {
-      // items mode
       const totals: Record<string, number> = {}
       for (const [idxStr, handle] of Object.entries(itemAssignments)) {
         const item = receipt.items[parseInt(idxStr)]
@@ -135,8 +138,36 @@ export default function SplitPage() {
       splits = Object.entries(totals).map(([handle, amount]) => ({
         handle,
         amount,
-        payLink: buildPayLink(amount, splitId),
+        payLink: buildPayLink(amount, tempId),
       }))
+    }
+
+    // Save to Supabase and get a real split ID
+    try {
+      const res = await fetch("/api/splits/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          merchant: receipt.merchant,
+          currency,
+          total: receipt.total,
+          splits: splits.map((s) => ({ handle: s.handle, amount: s.amount })),
+        }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        const splitId: string = json.splitId
+        splits = splits.map((s) => {
+          const rawHandle = s.handle.replace(/^@/, "")
+          return {
+            ...s,
+            payLink: buildPayLink(s.amount, splitId),
+            deepLink: `https://t.me/${botUsername}?start=pay_${splitId}_${rawHandle}`,
+          }
+        })
+      }
+    } catch {
+      // fallback: use temp ID, no deep links
     }
 
     setResults(splits)
@@ -394,19 +425,31 @@ export default function SplitPage() {
 
             <div className="space-y-3">
               {results.map((s) => (
-                <div key={s.handle} className="bg-white rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
-                  <div>
+                <div key={s.handle} className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
                     <p className="font-semibold text-sm">{s.handle}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">owes {currency}{s.amount.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-blue-600">{currency}{s.amount.toFixed(2)}</p>
                   </div>
-                  <a
-                    href={s.payLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="shrink-0 px-4 py-2 rounded-xl bg-blue-500 text-white text-sm font-semibold active:scale-95 transition-transform"
-                  >
-                    💎 Pay
-                  </a>
+                  <div className="flex gap-2">
+                    {s.deepLink && (
+                      <a
+                        href={s.deepLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold text-center active:scale-95 transition-transform"
+                      >
+                        💬 Send request
+                      </a>
+                    )}
+                    <a
+                      href={s.payLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-sm font-semibold text-center active:scale-95 transition-transform"
+                    >
+                      💎 Pay now
+                    </a>
+                  </div>
                 </div>
               ))}
             </div>

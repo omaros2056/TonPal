@@ -113,6 +113,60 @@ export function createBot(token: string): Bot {
 
   // ── /start ──────────────────────────────────────────────────────────────────
   instance.command("start", async (ctx) => {
+    const payload = ctx.match ?? ""
+
+    // Deep link: /start pay_{splitId}_{handle}
+    if (typeof payload === "string" && payload.startsWith("pay_")) {
+      const parts = payload.slice("pay_".length).split("_")
+      const splitId = parts[0]
+      const rawHandle = parts.slice(1).join("_")
+
+      try {
+        const { createClient } = await import("@supabase/supabase-js")
+        const db = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        )
+        const { data } = await db.from("tonpal_splits").select("data").eq("id", splitId).single()
+
+        if (data?.data) {
+          const split = data.data as {
+            merchant: string
+            currency: string
+            total: number
+            splits: { handle: string; amount: number }[]
+          }
+          const handle = `@${rawHandle}`
+          const entry = split.splits.find(
+            (s) => s.handle.toLowerCase() === handle.toLowerCase()
+          )
+
+          if (entry) {
+            const nanotons = Math.round(entry.amount * 1_000_000_000).toString()
+            const params = new URLSearchParams({
+              startattach: "pay",
+              amount: nanotons,
+              currency: "TON",
+              comment: `TonPal-${splitId}`,
+            })
+            const payLink = `https://t.me/wallet?${params.toString()}`
+            const kb = new InlineKeyboard().url("💎 Pay with Telegram Wallet", payLink)
+
+            await ctx.reply(
+              `👋 Hey ${ctx.from?.first_name ?? handle}!\n\nYou owe ${b(`${split.currency}${entry.amount.toFixed(2)}`)} for ${b(split.merchant)}.\n\nTap below to pay instantly:`,
+              { ...HTML, reply_markup: kb }
+            )
+            return
+          }
+        }
+      } catch (err) {
+        console.error("[bot] pay deep link error:", err)
+      }
+
+      await ctx.reply("Sorry, I couldn't find that payment request. It may have expired.")
+      return
+    }
+
     const firstName = ctx.from?.first_name ?? "there"
     await ctx.reply(
       `👋 Hey ${firstName}! I'm ${b("TonPal")} — your group expense assistant.\n\nUse /tonpal to get started.`,
@@ -122,10 +176,11 @@ export function createBot(token: string): Bot {
 
   // ── /tonpal — main entry point ───────────────────────────────────────────────
   instance.command("tonpal", async (ctx) => {
-    const miniAppUrl = `${APP_URL}/miniapp`
-    const kb = new InlineKeyboard().webApp("🧾 Open TonPal", miniAppUrl)
+    const chatId = ctx.chat.id
+    await setSession(chatId, { state: "awaiting_receipt" })
+    const kb = new InlineKeyboard().text("🧾 Split a bill", "feature_split")
     await ctx.reply(
-      `👋 Welcome to ${b("TonPal")}!\n\nTap below to scan a receipt and split the bill with your group.`,
+      `💼 ${b("TonPal")} — What do you want to do?`,
       { ...HTML, reply_markup: kb }
     )
   })
@@ -423,16 +478,35 @@ export function createBot(token: string): Bot {
         paymentEntries
       )
 
+      // Save split to DB so the deep link can look it up
+      try {
+        const { createClient } = await import("@supabase/supabase-js")
+        const db = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        )
+        await db.from("tonpal_splits").insert({
+          id: splitId,
+          data: {
+            merchant: scan.merchant,
+            currency,
+            total: scan.total,
+            splits: participants.map((p) => ({ handle: p.handle, amount: p.amount })),
+          },
+        })
+      } catch (err) {
+        console.error("[bot] Failed to save split to DB:", err)
+      }
+
       await updateSession(chatId, { splitSessionId: splitId, statusMessageId: statusMsgId })
 
-      // Post individual payment links in the group — one per person
+      const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
+
+      // Post one message per person with a deep link to their private payment chat
       for (const p of participants) {
-        const walletLink = buildTelegramWalletLink(
-          p.amount,
-          splitId,
-          `${p.handle} owes for ${scan.merchant}`
-        )
-        const kb = new InlineKeyboard().url("💎 Pay with TON Wallet", walletLink)
+        const rawHandle = p.handle.replace(/^@/, "")
+        const deepLink = `https://t.me/${botUsername}?start=pay_${splitId}_${rawHandle}`
+        const kb = new InlineKeyboard().url("💎 Tap to pay", deepLink)
         await instance.api.sendMessage(
           chatId,
           `${p.handle} — you owe ${b(`${currency}${p.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,

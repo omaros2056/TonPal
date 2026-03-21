@@ -28,6 +28,7 @@
     "clsx": "^2",
     "grammy": "^1",
     "lucide-react": "^0.400",
+    "nanoid": "^5.1.7",
     "next": "^15.1.11",
     "postcss": "^8",
     "react": "^19.0.0",
