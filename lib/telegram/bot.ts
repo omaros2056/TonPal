@@ -628,5 +628,5 @@ export async function startBot(): Promise<void> {
 }
 
 export async function handleWebhook(req: Request): Promise<Response> {
-  return webhookCallback(getBot(), "std/http")(req)
+  return webhookCallback(getBot(), "std/http", { timeoutMilliseconds: 55_000 })(req)
 }
