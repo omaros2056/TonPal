@@ -98,25 +98,15 @@ async function parseReceipt(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
-    if (res.ok) {
-      const json = await res.json()
-      if (json.success) return json.data as ReceiptScan
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error ?? `Parse API returned ${res.status}`)
     }
-  } catch {
-    // fall through to stub
-  }
-
-  // Demo stub
-  return {
-    merchant: "Restaurant",
-    currency: "€",
-    total: 84.0,
-    items: [
-      { name: "Steak", quantity: 1, unitPrice: 28, totalPrice: 28 },
-      { name: "Pasta", quantity: 1, unitPrice: 18, totalPrice: 18 },
-      { name: "Wine", quantity: 1, unitPrice: 22, totalPrice: 22 },
-      { name: "Dessert", quantity: 2, unitPrice: 8, totalPrice: 16 },
-    ],
+    const json = await res.json()
+    if (!json.success) throw new Error(json.error ?? "Parse API returned success=false")
+    return json.data as ReceiptScan
+  } catch (err) {
+    throw new Error(`Receipt parsing failed: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 

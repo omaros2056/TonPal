@@ -1,7 +1,5 @@
 import { generateObject } from "ai"
-import { anthropic } from "@ai-sdk/anthropic"
 import { google } from "@ai-sdk/google"
-import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import { z } from "zod"
 import type { ReceiptScan } from "@/types"
 
@@ -87,42 +85,18 @@ function buildMessages(input: ParseReceiptInput) {
 }
 
 export async function parseReceipt(input: ParseReceiptInput): Promise<ReceiptScan> {
-  const openrouter = createOpenRouter({
-    apiKey: process.env.OPENROUTER_API_KEY ?? "",
+  const messages = buildMessages(input)
+
+  const result = await generateObject({
+    model: google("gemini-1.5-flash"),
+    schema: receiptSchema,
+    messages,
   })
 
-  // Model routing: Gemini Flash → Claude Haiku → OpenRouter Llama Vision
-  const models = [
-    google("gemini-1.5-flash"),
-    anthropic("claude-3-5-haiku-20241022"),
-    openrouter("meta-llama/llama-3.2-11b-vision-instruct:free"),
-  ]
-
-  const messages = buildMessages(input)
-  let lastError: unknown
-
-  for (const model of models) {
-    try {
-      const result = await generateObject({
-        model,
-        schema: receiptSchema,
-        messages,
-      })
-
-      // Preserve rawImageUrl from input if model didn't set it
-      const parsed = result.object as ReceiptScan
-      if (!parsed.rawImageUrl && input.imageUrl) {
-        parsed.rawImageUrl = input.imageUrl
-      }
-
-      return parsed
-    } catch (err) {
-      lastError = err
-      // Fall through to next model
-    }
+  const parsed = result.object as ReceiptScan
+  if (!parsed.rawImageUrl && input.imageUrl) {
+    parsed.rawImageUrl = input.imageUrl
   }
 
-  throw new Error(
-    `All AI models failed to parse the receipt. Last error: ${String(lastError)}`
-  )
+  return parsed
 }
