@@ -2,7 +2,7 @@
 // Re-exports from BSA-aligned middleware and core modules.
 // BSA x TON Hackathon template: bsaepfl/bsa-sp-template-x402-2026
 
-export { paymentGate } from "./middleware"
+export { paymentGate, paymentGate as x402Gate } from "./middleware"
 
 export {
   getPaymentConfig,

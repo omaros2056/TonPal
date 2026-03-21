@@ -10,9 +10,7 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "**.arweave.net" },
     ],
   },
-  experimental: {
-    serverComponentsExternalPackages: ["xrpl", "grammy"],
-  },
+  serverExternalPackages: ["xrpl", "grammy"],
 }
 
 export default nextConfig
