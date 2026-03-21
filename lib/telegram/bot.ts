@@ -19,7 +19,7 @@ import { buildTelegramWalletLink } from "@/lib/rails/ton/payment-link"
 
 // Token check is deferred to runtime (not build time) — see getBot() below
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://satsplit.app"
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://ton-pal.vercel.app"
 
 // ─── Payment request DM ───────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ export default function Home() {
           TON payments · ENS identity · XRPL commitment
         </p>
         <div className="text-sm text-gray-400 mt-8">
-          Open via Telegram bot: <strong>@SatSplitBot</strong>
+          Open via Telegram bot: <strong>@{process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"}</strong>
         </div>
       </div>
     </main>
