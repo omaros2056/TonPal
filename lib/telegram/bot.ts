@@ -71,12 +71,28 @@ export async function sendPaymentRequest(
  * Call the receipt-parse API and return a ReceiptScan.
  * Falls back to a demo stub if the service is unavailable.
  */
+async function resolveFileUrl(fileId: string): Promise<string> {
+  const token = process.env.TELEGRAM_BOT_TOKEN!
+  const res = await fetch(
+    `https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`
+  )
+  const json = await res.json()
+  const filePath: string = json.result.file_path
+  return `https://api.telegram.org/file/bot${token}/${filePath}`
+}
+
 async function parseReceipt(
   fileId: string | null,
   text: string | null
 ): Promise<ReceiptScan> {
   try {
-    const body = fileId ? { fileId } : { text }
+    let body: Record<string, string>
+    if (fileId) {
+      const imageUrl = await resolveFileUrl(fileId)
+      body = { imageUrl }
+    } else {
+      body = { text: text ?? "" }
+    }
     const res = await fetch(`${APP_URL}/api/receipts/parse`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
