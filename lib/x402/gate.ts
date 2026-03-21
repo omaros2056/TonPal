@@ -3,7 +3,7 @@
 // BSA x TON Hackathon template: bsaepfl/bsa-sp-template-x402-2026
 
 import { NextRequest, NextResponse } from "next/server"
-import { HEADER_PAYMENT_REQUIRED, HEADER_PAYMENT_SIGNATURE, encodePaymentRequired } from "./core"
+import { HEADER_PAYMENT_REQUIRED, HEADER_PAYMENT_SIGNATURE, encodePaymentRequired, TON_ASSET } from "./core"
 
 /**
  * Inline gate for use inside route handlers.
@@ -29,7 +29,7 @@ export function x402Gate(
     mimeType: "application/json",
     payTo: process.env.PAYMENT_ADDRESS ?? "",
     maxTimeoutSeconds: 300,
-    asset: "TON",
+    asset: TON_ASSET,
   })
   return new NextResponse(
     JSON.stringify({ success: false, error: "Payment required" }),
