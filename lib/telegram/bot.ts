@@ -106,6 +106,60 @@ function buildReceiptSummaryText(scan: ReceiptScan): string {
   )
 }
 
+// ─── Private payment DM helper ───────────────────────────────────────────────
+// Sends the payment buttons with pre-filled amount to whoever clicked the link.
+// Called from both the universal split_ deep link and (future) remind flows.
+async function sendPaymentDM(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: any,
+  split: { merchant: string; currency: string; total: number },
+  entry: { amount: number },
+  splitId: string
+): Promise<void> {
+  const amountTon = entry.amount   // fiat treated as TON for demo/testnet
+  const nanotons = Math.round(amountTon * 1_000_000_000)
+  const comment = `TonPal-${splitId.slice(-8)}`
+  const collectionAddress = process.env.TON_COLLECTION_ADDRESS ?? ""
+  const isTestnet = (process.env.TON_NETWORK ?? "testnet") === "testnet"
+
+  const kb = new InlineKeyboard()
+
+  if (collectionAddress) {
+    const tonkeeperLink = buildTonkeeperPaymentLink({
+      toAddress: collectionAddress,
+      amountTon,
+      comment,
+    })
+    kb.url("💎 Pay with Tonkeeper", tonkeeperLink).row()
+  }
+
+  const walletParams = new URLSearchParams({
+    startattach: "pay",
+    amount: nanotons.toString(),
+    currency: "TON",
+    comment,
+  })
+  kb.url("💰 Telegram Wallet", `https://t.me/wallet?${walletParams.toString()}`)
+
+  const addrDisplay = collectionAddress
+    ? `\n📍 To: ${code(collectionAddress.slice(0, 6) + "…" + collectionAddress.slice(-4))}`
+    : ""
+
+  const testnetNote = isTestnet
+    ? `\n\n${i("⚠️ Testnet — switch Tonkeeper to testnet mode (Settings → Dev tools)")}`
+    : ""
+
+  await ctx.reply(
+    `👋 Hey ${ctx.from?.first_name ?? "there"}!\n\n` +
+    `You owe ${b(`${amountTon.toFixed(2)} TON`)} ` +
+    `(${split.currency}${entry.amount.toFixed(2)}) for ${b(split.merchant)}.` +
+    addrDisplay +
+    testnetNote +
+    `\n\nTap below to pay:`,
+    { ...HTML, reply_markup: kb }
+  )
+}
+
 // ─── Remove inline keyboard from the message that was just clicked ────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function removeKeyboard(ctx: any): Promise<void> {
@@ -142,11 +196,20 @@ export function createBot(token: string): Bot {
   instance.command("start", async (ctx) => {
     const payload = ctx.match ?? ""
 
-    // Deep link: /start pay_{splitId}_{handle}
-    if (typeof payload === "string" && payload.startsWith("pay_")) {
-      const parts = payload.slice("pay_".length).split("_")
-      const splitId = parts[0]
-      const rawHandle = parts.slice(1).join("_")
+    // Universal split deep link: /start split_{splitId}
+    // The bot identifies the clicker by their Telegram username and shows only their share.
+    if (typeof payload === "string" && payload.startsWith("split_")) {
+      const splitId = payload.slice("split_".length)
+      const username = ctx.from?.username
+
+      if (!username) {
+        await ctx.reply(
+          `❌ You need a Telegram username to use TonPal payments.\n\n` +
+          `Set one in ${b("Settings → Edit Profile → Username")}, then tap the link again.`,
+          HTML
+        )
+        return
+      }
 
       try {
         const { createClient } = await import("@supabase/supabase-js")
@@ -163,68 +226,32 @@ export function createBot(token: string): Bot {
             total: number
             splits: { handle: string; amount: number }[]
           }
-          const handle = `@${rawHandle}`
+
+          // Match by Telegram username (case-insensitive)
+          const handle = `@${username}`
           const entry = split.splits.find(
             (s) => s.handle.toLowerCase() === handle.toLowerCase()
           )
 
-          if (entry) {
-            // For the demo/testnet we treat the fiat amount directly as TON.
-            // Replace TON_COLLECTION_ADDRESS in your env with your testnet wallet address.
-            const amountTon = entry.amount
-            const nanotons = Math.round(amountTon * 1_000_000_000)
-            const comment = `TonPal-${splitId.slice(-8)}`
-            const collectionAddress = process.env.TON_COLLECTION_ADDRESS ?? ""
-            const network = process.env.TON_NETWORK ?? "testnet"
-            const isTestnet = network === "testnet"
-
-            const kb = new InlineKeyboard()
-
-            if (collectionAddress) {
-              // Primary: Tonkeeper with pre-filled address + exact amount + memo
-              const tonkeeperLink = buildTonkeeperPaymentLink({
-                toAddress: collectionAddress,
-                amountTon,
-                comment,
-              })
-              kb.url("💎 Pay with Tonkeeper", tonkeeperLink).row()
-            }
-
-            // Secondary: Telegram Wallet (mainnet only, no address pre-fill)
-            const walletParams = new URLSearchParams({
-              startattach: "pay",
-              amount: nanotons.toString(),
-              currency: "TON",
-              comment,
-            })
-            kb.url("💰 Telegram Wallet", `https://t.me/wallet?${walletParams.toString()}`)
-
-            // Address display: show first 6 + last 4 chars
-            const addrDisplay = collectionAddress
-              ? `\n📍 To: ${code(collectionAddress.slice(0, 6) + "…" + collectionAddress.slice(-4))}`
-              : ""
-
-            const testnetNote = isTestnet
-              ? `\n\n${i("⚠️ Testnet — use Tonkeeper in testnet mode (Settings → Dev tools)")}`
-              : ""
-
+          // Not part of this split → they're clear
+          if (!entry) {
             await ctx.reply(
-              `👋 Hey ${ctx.from?.first_name ?? handle}!\n\n` +
-              `You owe ${b(`${amountTon.toFixed(2)} TON`)} ` +
-              `(${split.currency}${entry.amount.toFixed(2)}) for ${b(split.merchant)}.` +
-              addrDisplay +
-              testnetNote +
-              `\n\nTap below to pay:`,
-              { ...HTML, reply_markup: kb }
+              `✅ ${b("You're all clear!")} You don't owe anything for ${b(split.merchant)}.\n\n` +
+              `${i("This split doesn't include your username (@" + username + ").")}`,
+              HTML
             )
             return
           }
+
+          // Build payment buttons with pre-filled amount
+          await sendPaymentDM(ctx, split, entry, splitId)
+          return
         }
       } catch (err) {
-        console.error("[bot] pay deep link error:", err)
+        console.error("[bot] split deep link error:", err)
       }
 
-      await ctx.reply("Sorry, I couldn't find that payment request. It may have expired.")
+      await ctx.reply("Sorry, I couldn't find that split. It may have expired.")
       return
     }
 
@@ -580,15 +607,18 @@ export function createBot(token: string): Bot {
 
       const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
 
-      // Post one message per person with a deep link to their private payment chat
+      // Universal link — same for everyone; the bot identifies the clicker by username
+      const universalLink = `https://t.me/${botUsername}?start=split_${splitId}`
+      const universalKb = new InlineKeyboard().url("💎 View your share & pay", universalLink)
+
+      // Post one message per person showing their amount publicly (social accountability),
+      // but the button is universal — clicking it opens a private chat where the bot
+      // identifies who you are and shows only your share.
       for (const p of participants) {
-        const rawHandle = p.handle.replace(/^@/, "")
-        const deepLink = `https://t.me/${botUsername}?start=pay_${splitId}_${rawHandle}`
-        const kb = new InlineKeyboard().url("💎 Tap to pay", deepLink)
         await instance.api.sendMessage(
           chatId,
           `${p.handle} — you owe ${b(`${currency}${p.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
-          { ...HTML, reply_markup: kb }
+          { ...HTML, reply_markup: universalKb }
         )
       }
       return
@@ -663,10 +693,10 @@ export function createBot(token: string): Bot {
       }
 
       const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
-      const deepLink = `https://t.me/${botUsername}?start=pay_${splitId}_${rawHandle}`
+      const universalLink = `https://t.me/${botUsername}?start=split_${splitId}`
       const currency = scan.currency ?? "€"
 
-      const kb = new InlineKeyboard().url("💎 Tap to pay", deepLink)
+      const kb = new InlineKeyboard().url("💎 View your share & pay", universalLink)
       await ctx.reply(
         `🔔 ${b("Reminder:")} ${handle} — you still owe ${b(`${currency}${participant.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
         { ...HTML, reply_markup: kb }
