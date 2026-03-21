@@ -71,7 +71,7 @@ async function seed() {
             amount: splitData.total_amount / participants.length,
             status: 'paid',
             payment_link: 'ton://demo',
-            rail: pData.xrp_address ? 'xrpl' : 'ton',
+            rail: (pData as any).xrp_address ? 'xrpl' : 'ton',
           })
           .select()
           .single()
