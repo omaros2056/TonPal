@@ -8,6 +8,7 @@ import type { ReceiptScan } from "@/types"
 
 export type ConversationState =
   | "idle"
+  | "awaiting_feature"
   | "awaiting_receipt"
   | "awaiting_participant_count"
   | "collecting_handles"

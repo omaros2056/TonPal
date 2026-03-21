@@ -121,54 +121,37 @@ function buildReceiptSummaryText(scan: ReceiptScan): string {
 export function createBot(token: string): Bot {
   const instance = new Bot(token)
 
+  // ── Feature menu keyboard ────────────────────────────────────────────────────
+  function featureMenu(): InlineKeyboard {
+    return new InlineKeyboard()
+      .text("🧾 Split a bill", "feature_split")
+  }
+
   // ── /start ──────────────────────────────────────────────────────────────────
   instance.command("start", async (ctx) => {
     const firstName = ctx.from?.first_name ?? "there"
-    const keyboard = new InlineKeyboard().webApp(
-      "Open SatSplit",
-      `${APP_URL}/miniapp`
-    )
-
     await ctx.reply(
-      `👋 Welcome to *SatSplit*, ${firstName}!\n\n` +
-        "Split group expenses in seconds — powered by AI and settled on TON or XRPL.\n\n" +
-        "*How it works:*\n" +
-        "1. Use /split in any group chat\n" +
-        "2. Send a receipt photo or describe the bill\n" +
-        "3. Everyone pays via Telegram Wallet\n\n" +
-        "_Try it — use /split to get started!_",
-      { parse_mode: "Markdown", reply_markup: keyboard }
+      `👋 Hey ${firstName}! I'm *TonPal* — your group expense assistant.\n\nUse /tonpal to get started.`,
+      { parse_mode: "Markdown" }
     )
   })
 
-  // ── /split ──────────────────────────────────────────────────────────────────
+  // ── /tonpal — main entry point ───────────────────────────────────────────────
+  instance.command("tonpal", async (ctx) => {
+    const chatId = ctx.chat.id
+    setSession(chatId, { state: "awaiting_feature" })
+
+    await ctx.reply(
+      "💼 *TonPal* — What do you want to do?",
+      { parse_mode: "Markdown", reply_markup: featureMenu() }
+    )
+  })
+
+  // ── /split — shortcut alias ──────────────────────────────────────────────────
   instance.command("split", async (ctx) => {
     const chatId = ctx.chat.id
     setSession(chatId, { state: "awaiting_receipt" })
-
-    await ctx.reply(
-      "📸 Send me a receipt photo or describe the bill.",
-      { parse_mode: "Markdown" }
-    )
-  })
-
-  // ── /status <id> ─────────────────────────────────────────────────────────────
-  instance.command("status", async (ctx) => {
-    const parts = (ctx.message?.text ?? "").split(" ")
-    const splitId = parts[1]?.trim()
-
-    if (!splitId) {
-      await ctx.reply(
-        "Please provide a split ID.\nUsage: `/status <split-id>`",
-        { parse_mode: "Markdown" }
-      )
-      return
-    }
-
-    await ctx.reply(
-      `🔍 Looking up split \`${splitId}\`...`,
-      { parse_mode: "Markdown" }
-    )
+    await ctx.reply("📸 Send me a receipt photo or describe the bill.", { parse_mode: "Markdown" })
   })
 
   // ── Photo messages ───────────────────────────────────────────────────────────
@@ -328,6 +311,17 @@ export function createBot(token: string): Bot {
     }
 
     const session = getSession(chatId)
+
+    // ── feature_split — chosen from /tonpal menu ───────────────────────────────
+    if (data === "feature_split") {
+      await ctx.answerCallbackQuery()
+      setSession(chatId, { state: "awaiting_receipt" })
+      await ctx.reply(
+        "📸 Send me a receipt photo or describe the bill and I'll parse it for you.",
+        { parse_mode: "Markdown" }
+      )
+      return
+    }
 
     // ── split_equal ────────────────────────────────────────────────────────────
     if (data === "split_equal") {
