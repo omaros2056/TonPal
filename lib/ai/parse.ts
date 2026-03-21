@@ -88,7 +88,7 @@ export async function parseReceipt(input: ParseReceiptInput): Promise<ReceiptSca
   const messages = buildMessages(input)
 
   const result = await generateObject({
-    model: google("gemini-2.0-flash"),
+    model: google("gemini-2.0-flash-lite"),
     schema: receiptSchema,
     messages,
   })
