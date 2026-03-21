@@ -176,15 +176,8 @@ export function createBot(token: string): Bot {
     const chatId = ctx.chat.id
     const session = getSession(chatId)
 
-    // Auto-start: if idle or no active flow, treat photo as a new split
-    if (session.state !== "awaiting_receipt") {
-      if (session.state === "idle") {
-        setSession(chatId, { state: "awaiting_receipt" })
-      } else {
-        await ctx.reply("Use /split to start a new split first.")
-        return
-      }
-    }
+    // Always accept a photo — start a fresh split regardless of current state
+    setSession(chatId, { state: "awaiting_receipt" })
 
     const processingMsg = await ctx.reply(
       "Got it! Analyzing your receipt... 📊\n_This may take a few seconds._",
