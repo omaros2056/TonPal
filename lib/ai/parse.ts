@@ -92,7 +92,7 @@ export async function parseReceipt(input: ParseReceiptInput): Promise<ReceiptSca
   const messages = buildMessages(input)
 
   const result = await generateObject({
-    model: openrouter("google/gemini-2.0-flash-exp:free"),
+    model: openrouter("meta-llama/llama-4-scout:free"),
     schema: receiptSchema,
     mode: "json",
     messages,
