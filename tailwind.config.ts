@@ -10,6 +10,9 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        border: "hsl(var(--border))",
         brand: {
           DEFAULT: "#0088CC", // Telegram blue
           dark: "#006BA6",
