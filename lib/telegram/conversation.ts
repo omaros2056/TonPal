@@ -1,7 +1,8 @@
-// In-memory conversation session state for the Telegram bot.
-// Uses a simple Map keyed by chatId — sufficient for a hackathon demo.
-// In production this would be backed by Redis or a DB.
+// Supabase-backed conversation session state for the Telegram bot.
+// Each session is stored as a JSONB row in bot_sessions, keyed by chat_id.
+// This survives Vercel cold starts / multiple function instances.
 
+import { createClient } from "@supabase/supabase-js"
 import type { ReceiptScan } from "@/types"
 
 // ─── Session state machine ────────────────────────────────────────────────────
@@ -21,54 +22,71 @@ export type ConversationState =
 export type SplitMode = "equal" | "items" | "custom"
 
 export interface ParticipantEntry {
-  handle: string        // @alice
-  amount: number        // fiat amount owed
+  handle: string   // @alice
+  amount: number   // fiat amount owed
 }
 
 export interface ConversationSession {
   state: ConversationState
   receiptScan?: ReceiptScan
   splitMode?: SplitMode
-  /** Items with per-participant assignment (index into participants array) */
-  itemAssignments?: Record<number, string>  // itemIndex -> handle
-  /** Resolved participants with amounts */
+  itemAssignments?: Record<number, string>
   participants?: ParticipantEntry[]
-  /** For item-by-item assignment loop */
   currentItemIndex?: number
-  /** Total number of people splitting */
   participantCount?: number
-  /** Handles collected so far during one-by-one collection */
   collectedHandles?: string[]
-  /** Index of next handle to collect */
   currentHandleIndex?: number
-  /** The status board message id for editing in-place */
   statusMessageId?: number
-  /** The split session id once persisted */
   splitSessionId?: string
 }
 
-// ─── Storage ─────────────────────────────────────────────────────────────────
+// ─── Supabase admin client (no cookies needed) ───────────────────────────────
 
-const sessions = new Map<number, ConversationSession>()
-
-export function getSession(chatId: number): ConversationSession {
-  return sessions.get(chatId) ?? { state: "idle" }
+function getDb() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
 }
 
-export function setSession(chatId: number, session: ConversationSession): void {
-  sessions.set(chatId, session)
+// ─── In-memory cache (warm-instance optimisation) ────────────────────────────
+
+const cache = new Map<number, ConversationSession>()
+
+// ─── Public API — all async ───────────────────────────────────────────────────
+
+export async function getSession(chatId: number): Promise<ConversationSession> {
+  if (cache.has(chatId)) return cache.get(chatId)!
+
+  const { data } = await getDb()
+    .from("bot_sessions")
+    .select("data")
+    .eq("chat_id", chatId)
+    .single()
+
+  const session: ConversationSession = (data?.data as ConversationSession) ?? { state: "idle" }
+  cache.set(chatId, session)
+  return session
 }
 
-export function updateSession(
+export async function setSession(chatId: number, session: ConversationSession): Promise<void> {
+  cache.set(chatId, session)
+  await getDb()
+    .from("bot_sessions")
+    .upsert({ chat_id: chatId, data: session, updated_at: new Date().toISOString() })
+}
+
+export async function updateSession(
   chatId: number,
   patch: Partial<ConversationSession>
-): ConversationSession {
-  const current = getSession(chatId)
+): Promise<ConversationSession> {
+  const current = await getSession(chatId)
   const updated = { ...current, ...patch }
-  sessions.set(chatId, updated)
+  await setSession(chatId, updated)
   return updated
 }
 
-export function clearSession(chatId: number): void {
-  sessions.delete(chatId)
+export async function clearSession(chatId: number): Promise<void> {
+  cache.delete(chatId)
+  await getDb().from("bot_sessions").delete().eq("chat_id", chatId)
 }
