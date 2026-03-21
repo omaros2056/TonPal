@@ -272,6 +272,35 @@ export function createBot(token: string): Bot {
       return
     }
 
+    // ── State: awaiting handles for item assignment ────────────────────────────
+    if (session.state === "awaiting_participants_for_items") {
+      const handles = text
+        .split(/\s+/)
+        .map((h) => h.trim())
+        .filter((h) => h.startsWith("@") || h.match(/^\w+$/))
+        .map((h) => (h.startsWith("@") ? h : `@${h}`))
+
+      if (handles.length === 0) {
+        await ctx.reply(
+          "I didn't catch any handles. Please send @handles like:\n`@alice\n@bob`",
+          { parse_mode: "Markdown" }
+        )
+        return
+      }
+
+      const scan = session.receiptScan!
+      // Store handles as placeholder participants (amounts resolved after assignment)
+      const placeholderParticipants = handles.map((handle) => ({ handle, amount: 0 }))
+
+      updateSession(chatId, {
+        state: "assigning_items",
+        participants: placeholderParticipants,
+      })
+
+      await sendItemAssignmentPrompt(instance, chatId, scan, 0)
+      return
+    }
+
     // ── State: awaiting participant handles ────────────────────────────────────
     if (session.state === "awaiting_participants") {
       const handles = text
@@ -380,15 +409,18 @@ export function createBot(token: string): Bot {
         return
       }
 
+      // Ask for the real participants before assigning items
       updateSession(chatId, {
-        state: "assigning_items",
         splitMode: "items",
+        state: "awaiting_participants_for_items",
         currentItemIndex: 0,
         itemAssignments: {},
       })
 
-      // Ask who had the first item
-      await sendItemAssignmentPrompt(instance, chatId, scan, 0)
+      await ctx.reply(
+        "Who's at the table? Send me everyone's @handles, one per line.\n_Example:_\n`@alice\n@bob\n@charlie`",
+        { parse_mode: "Markdown" }
+      )
       return
     }
 
