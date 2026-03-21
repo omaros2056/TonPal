@@ -425,10 +425,20 @@ export function createBot(token: string): Bot {
 
       await updateSession(chatId, { splitSessionId: splitId, statusMessageId: statusMsgId })
 
-      await ctx.reply(
-        `✅ Payment requests sent to ${participants.length} participant(s)!\n\n${i("Each person received a direct message with their payment link.")}`,
-        HTML
-      )
+      // Post individual payment links in the group — one per person
+      for (const p of participants) {
+        const walletLink = buildTelegramWalletLink(
+          p.amount,
+          splitId,
+          `${p.handle} owes for ${scan.merchant}`
+        )
+        const kb = new InlineKeyboard().url("💎 Pay with TON Wallet", walletLink)
+        await instance.api.sendMessage(
+          chatId,
+          `${p.handle} — you owe ${b(`${currency}${p.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
+          { ...HTML, reply_markup: kb }
+        )
+      }
       return
     }
 
