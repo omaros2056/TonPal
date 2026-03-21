@@ -83,7 +83,7 @@ export default function MiniAppPage() {
           <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-bold select-none">
             S
           </div>
-          <h1 className="text-base font-semibold tracking-tight">SatSplit</h1>
+          <h1 className="text-base font-semibold tracking-tight">TonPal</h1>
         </div>
         <TonLogo />
       </header>

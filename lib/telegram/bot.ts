@@ -122,12 +122,12 @@ export function createBot(token: string): Bot {
 
   // ── /tonpal — main entry point ───────────────────────────────────────────────
   instance.command("tonpal", async (ctx) => {
-    const chatId = ctx.chat.id
-    await setSession(chatId, { state: "awaiting_feature" })
-    await ctx.reply(`💼 ${b("TonPal")} — What do you want to do?`, {
-      ...HTML,
-      reply_markup: featureMenu(),
-    })
+    const miniAppUrl = `${APP_URL}/miniapp`
+    const kb = new InlineKeyboard().webApp("🧾 Open TonPal", miniAppUrl)
+    await ctx.reply(
+      `👋 Welcome to ${b("TonPal")}!\n\nTap below to scan a receipt and split the bill with your group.`,
+      { ...HTML, reply_markup: kb }
+    )
   })
 
   // ── Photo messages ───────────────────────────────────────────────────────────
