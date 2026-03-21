@@ -71,14 +71,19 @@ export async function sendPaymentRequest(
  * Call the receipt-parse API and return a ReceiptScan.
  * Falls back to a demo stub if the service is unavailable.
  */
-async function resolveFileUrl(fileId: string): Promise<string> {
+async function fetchFileAsBase64(fileId: string): Promise<string> {
   const token = process.env.TELEGRAM_BOT_TOKEN!
-  const res = await fetch(
+  // Step 1: get the file path from Telegram
+  const metaRes = await fetch(
     `https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`
   )
-  const json = await res.json()
-  const filePath: string = json.result.file_path
-  return `https://api.telegram.org/file/bot${token}/${filePath}`
+  const meta = await metaRes.json()
+  const filePath: string = meta.result.file_path
+  const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`
+  // Step 2: download the image bytes on our server
+  const imgRes = await fetch(fileUrl)
+  const buffer = await imgRes.arrayBuffer()
+  return Buffer.from(buffer).toString("base64")
 }
 
 async function parseReceipt(
@@ -88,8 +93,8 @@ async function parseReceipt(
   try {
     let body: Record<string, string>
     if (fileId) {
-      const imageUrl = await resolveFileUrl(fileId)
-      body = { imageUrl }
+      const imageBase64 = await fetchFileAsBase64(fileId)
+      body = { imageBase64 }
     } else {
       body = { text: text ?? "" }
     }
