@@ -1,7 +1,5 @@
 {
-  "url": "https://satsplit.vercel.app",
-  "name": "SatSplit AI",
-  "iconUrl": "https://satsplit.vercel.app/icon.png",
-  "termsOfUseUrl": "https://satsplit.vercel.app/terms",
-  "privacyPolicyUrl": "https://satsplit.vercel.app/privacy"
+  "url": "https://ton-pal.vercel.app",
+  "name": "TonPal",
+  "iconUrl": "https://ton-pal.vercel.app/icon.png"
 }

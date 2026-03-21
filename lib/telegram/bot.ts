@@ -736,20 +736,18 @@ export function createBot(token: string): Bot {
         statusMessageId: statusMsgId,
       })
 
-      const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
+      // Mini App pay button — opens /miniapp/pay/{splitId} inside Telegram.
+      // The page reads the user's Telegram identity from initDataUnsafe and shows
+      // only their share. Each participant gets their own public message for
+      // social accountability, but the same Mini App URL handles everyone.
+      const payUrl = `${APP_URL}/miniapp/pay/${splitId}`
+      const payKb = new InlineKeyboard().webApp("💎 Pay now", payUrl)
 
-      // Universal link — same for everyone; the bot identifies the clicker by username
-      const universalLink = `https://t.me/${botUsername}?start=split_${splitId}`
-      const universalKb = new InlineKeyboard().url("💎 View your share & pay", universalLink)
-
-      // Post one message per person showing their amount publicly (social accountability),
-      // but the button is universal — clicking it opens a private chat where the bot
-      // identifies who you are and shows only your share.
       for (const p of participants) {
         await instance.api.sendMessage(
           chatId,
           `${p.handle} — you owe ${b(`${currency}${p.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
-          { ...HTML, reply_markup: universalKb }
+          { ...HTML, reply_markup: payKb }
         )
       }
       return
@@ -823,11 +821,9 @@ export function createBot(token: string): Bot {
         return
       }
 
-      const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
-      const universalLink = `https://t.me/${botUsername}?start=split_${splitId}`
       const currency = scan.currency ?? "€"
-
-      const kb = new InlineKeyboard().url("💎 View your share & pay", universalLink)
+      const payUrl = `${APP_URL}/miniapp/pay/${splitId}`
+      const kb = new InlineKeyboard().webApp("💎 Pay now", payUrl)
       await ctx.reply(
         `🔔 ${b("Reminder:")} ${handle} — you still owe ${b(`${currency}${participant.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
         { ...HTML, reply_markup: kb }
