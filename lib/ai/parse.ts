@@ -1,11 +1,7 @@
 import { generateObject } from "ai"
-import { createOpenRouter } from "@openrouter/ai-sdk-provider"
+import { google } from "@ai-sdk/google"
 import { z } from "zod"
 import type { ReceiptScan } from "@/types"
-
-const openrouter = createOpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY,
-})
 
 // ─── Zod schema — mirrors ReceiptScan / ReceiptItem exactly ──────────────────
 
@@ -92,9 +88,8 @@ export async function parseReceipt(input: ParseReceiptInput): Promise<ReceiptSca
   const messages = buildMessages(input)
 
   const result = await generateObject({
-    model: openrouter("meta-llama/llama-4-scout:free"),
+    model: google("gemini-2.5-flash-lite-preview-06-17"),
     schema: receiptSchema,
-    mode: "json",
     messages,
   })
 
