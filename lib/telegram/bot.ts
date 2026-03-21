@@ -9,6 +9,7 @@ import {
   setSession,
   updateSession,
   clearSession,
+  type ConversationSession,
   type ParticipantEntry,
 } from "./conversation"
 import {
@@ -102,8 +103,31 @@ function buildReceiptSummaryText(scan: ReceiptScan): string {
   )
 }
 
-function featureMenu(): InlineKeyboard {
-  return new InlineKeyboard().text("🧾 Split a bill", "feature_split")
+// ─── Remove inline keyboard from the message that was just clicked ────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function removeKeyboard(ctx: any): Promise<void> {
+  try {
+    const msg = ctx.callbackQuery?.message
+    if (!msg) return
+    await ctx.api.editMessageReplyMarkup(msg.chat.id, msg.message_id, {})
+  } catch {
+    // Message may have been deleted or already modified — not a blocker
+  }
+}
+
+// ─── Stale-button guard ───────────────────────────────────────────────────────
+// Returns true if the callback data no longer makes sense for the current state.
+function isStaleCallback(data: string, session: ConversationSession): boolean {
+  if (data === "split_equal" || data === "split_items" || data === "split_custom") {
+    return session.state !== "awaiting_split_mode"
+  }
+  if (data === "confirm_split") {
+    return session.state !== "confirming"
+  }
+  if (data.startsWith("assign_")) {
+    return session.state !== "assigning_items"
+  }
+  return false
 }
 
 // ─── Bot factory ──────────────────────────────────────────────────────────────
@@ -368,9 +392,17 @@ export function createBot(token: string): Bot {
 
     const session = await getSession(chatId)
 
+    // ── Stale-button guard ─────────────────────────────────────────────────────
+    if (isStaleCallback(data, session)) {
+      await ctx.answerCallbackQuery("⏰ This button has already been used.")
+      await removeKeyboard(ctx)
+      return
+    }
+
     // ── feature_split ──────────────────────────────────────────────────────────
     if (data === "feature_split") {
       await ctx.answerCallbackQuery()
+      await removeKeyboard(ctx)
       await setSession(chatId, { state: "awaiting_receipt" })
       await ctx.reply("📸 Send me a receipt photo or describe the bill and I'll parse it for you.")
       return
@@ -379,6 +411,7 @@ export function createBot(token: string): Bot {
     // ── split_equal ────────────────────────────────────────────────────────────
     if (data === "split_equal") {
       await ctx.answerCallbackQuery()
+      await removeKeyboard(ctx)
 
       const scan = session.receiptScan
       const handles = session.collectedHandles ?? []
@@ -410,6 +443,7 @@ export function createBot(token: string): Bot {
     // ── split_items ────────────────────────────────────────────────────────────
     if (data === "split_items") {
       await ctx.answerCallbackQuery()
+      await removeKeyboard(ctx)
 
       const scan = session.receiptScan
       const handles = session.collectedHandles ?? []
@@ -434,6 +468,7 @@ export function createBot(token: string): Bot {
     // ── split_custom ───────────────────────────────────────────────────────────
     if (data === "split_custom") {
       await ctx.answerCallbackQuery()
+      await removeKeyboard(ctx)
 
       const handles = session.collectedHandles ?? []
       const scan = session.receiptScan
@@ -456,6 +491,7 @@ export function createBot(token: string): Bot {
     // ── confirm_split ──────────────────────────────────────────────────────────
     if (data === "confirm_split") {
       await ctx.answerCallbackQuery("Sending payment requests...")
+      await removeKeyboard(ctx)
 
       const scan = session.receiptScan
       const participants = session.participants
@@ -498,7 +534,12 @@ export function createBot(token: string): Bot {
         console.error("[bot] Failed to save split to DB:", err)
       }
 
-      await updateSession(chatId, { splitSessionId: splitId, statusMessageId: statusMsgId })
+      // Transition to split_active so old confirm/edit buttons are now stale
+      await updateSession(chatId, {
+        state: "split_active",
+        splitSessionId: splitId,
+        statusMessageId: statusMsgId,
+      })
 
       const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
 
@@ -517,10 +558,35 @@ export function createBot(token: string): Bot {
     }
 
     // ── edit_split ─────────────────────────────────────────────────────────────
+    // Preserve all collected data; go back to split-mode selection.
     if (data === "edit_split") {
       await ctx.answerCallbackQuery()
-      await setSession(chatId, { state: "awaiting_receipt" })
-      await ctx.reply("OK, send me the receipt photo or description again.")
+      await removeKeyboard(ctx)
+
+      const scan = session.receiptScan
+      const handles = session.collectedHandles ?? []
+
+      if (!scan) {
+        await ctx.reply("Session expired. Please start again with /tonpal.")
+        await setSession(chatId, { state: "awaiting_receipt" })
+        return
+      }
+
+      // Keep receiptScan and handles; reset only the split-mode state
+      await updateSession(chatId, {
+        state: "awaiting_split_mode",
+        splitMode: undefined,
+        participants: undefined,
+        itemAssignments: undefined,
+        currentItemIndex: undefined,
+      })
+
+      const currency = scan.currency ?? "€"
+      const names = handles.length > 0 ? handles.join(", ") : i("(no participants yet)")
+      await ctx.reply(
+        `✏️ ${b("Edit split")} — ${b(scan.merchant)} ${currency}${scan.total.toFixed(2)}\n\nParticipants: ${names}\n\nChoose how to split:`,
+        { ...HTML, reply_markup: receiptKeyboard() }
+      )
       return
     }
 
@@ -541,16 +607,42 @@ export function createBot(token: string): Bot {
     }
 
     // ── remind_{handle} ────────────────────────────────────────────────────────
+    // Re-sends the same deep link payment message as confirm_split, as a reminder.
     if (data.startsWith("remind_")) {
-      await ctx.answerCallbackQuery("Reminder sent!")
-      const handle = `@${data.slice("remind_".length)}`
-      await ctx.reply(`🔔 Reminder sent to ${handle}!`)
+      const rawHandle = data.slice("remind_".length)
+      const handle = `@${rawHandle}`
+
+      const scan = session.receiptScan
+      const participants = session.participants ?? []
+      const splitId = session.splitSessionId
+
+      const participant = participants.find(
+        (p) => p.handle.toLowerCase() === handle.toLowerCase()
+      )
+
+      if (!participant || !scan || !splitId) {
+        await ctx.answerCallbackQuery("Could not find reminder data.")
+        return
+      }
+
+      const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
+      const deepLink = `https://t.me/${botUsername}?start=pay_${splitId}_${rawHandle}`
+      const currency = scan.currency ?? "€"
+
+      const kb = new InlineKeyboard().url("💎 Tap to pay", deepLink)
+      await ctx.reply(
+        `🔔 ${b("Reminder:")} ${handle} — you still owe ${b(`${currency}${participant.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
+        { ...HTML, reply_markup: kb }
+      )
+
+      await ctx.answerCallbackQuery("🔔 Reminder sent!")
       return
     }
 
     // ── item assignment: assign_{handle}__{itemIndex} ──────────────────────────
     if (data.startsWith("assign_")) {
       await ctx.answerCallbackQuery()
+      await removeKeyboard(ctx)
 
       const parts = data.split("__")
       if (parts.length < 2) return

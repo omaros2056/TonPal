@@ -18,6 +18,7 @@ export type ConversationState =
   | "awaiting_participants"
   | "awaiting_participants_for_items"
   | "confirming"
+  | "split_active"
 
 export type SplitMode = "equal" | "items" | "custom"
 
