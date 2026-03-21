@@ -9,10 +9,12 @@ import type { ReceiptScan } from "@/types"
 export type ConversationState =
   | "idle"
   | "awaiting_receipt"
-  | "awaiting_split_mode"
   | "awaiting_participant_count"
+  | "collecting_handles"
+  | "awaiting_split_mode"
   | "assigning_items"
   | "awaiting_participants"
+  | "awaiting_participants_for_items"
   | "confirming"
 
 export type SplitMode = "equal" | "items" | "custom"
@@ -32,8 +34,12 @@ export interface ConversationSession {
   participants?: ParticipantEntry[]
   /** For item-by-item assignment loop */
   currentItemIndex?: number
-  /** Total number of people when doing equal split */
+  /** Total number of people splitting */
   participantCount?: number
+  /** Handles collected so far during one-by-one collection */
+  collectedHandles?: string[]
+  /** Index of next handle to collect */
+  currentHandleIndex?: number
   /** The status board message id for editing in-place */
   statusMessageId?: number
   /** The split session id once persisted */

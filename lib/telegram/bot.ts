@@ -176,9 +176,14 @@ export function createBot(token: string): Bot {
     const chatId = ctx.chat.id
     const session = getSession(chatId)
 
+    // Auto-start: if idle or no active flow, treat photo as a new split
     if (session.state !== "awaiting_receipt") {
-      await ctx.reply("Use /split first to start a new split.")
-      return
+      if (session.state === "idle") {
+        setSession(chatId, { state: "awaiting_receipt" })
+      } else {
+        await ctx.reply("Use /split to start a new split first.")
+        return
+      }
     }
 
     const processingMsg = await ctx.reply(
@@ -199,14 +204,14 @@ export function createBot(token: string): Bot {
       await ctx.api.deleteMessage(chatId, processingMsg.message_id).catch(() => {})
 
       updateSession(chatId, {
-        state: "awaiting_split_mode",
+        state: "awaiting_participant_count",
         receiptScan: scan,
       })
 
-      await ctx.reply(buildReceiptSummaryText(scan), {
-        parse_mode: "Markdown",
-        reply_markup: receiptKeyboard(),
-      })
+      await ctx.reply(
+        buildReceiptSummaryText(scan) + "\n\nHow many people are splitting this bill?",
+        { parse_mode: "Markdown" }
+      )
     } catch (err) {
       console.error("[bot] Photo handler error:", err)
       await ctx.reply("Sorry, I couldn't process that photo. Please try again.")
@@ -235,18 +240,18 @@ export function createBot(token: string): Bot {
       await ctx.api.deleteMessage(chatId, processingMsg.message_id).catch(() => {})
 
       updateSession(chatId, {
-        state: "awaiting_split_mode",
+        state: "awaiting_participant_count",
         receiptScan: scan,
       })
 
-      await ctx.reply(buildReceiptSummaryText(scan), {
-        parse_mode: "Markdown",
-        reply_markup: receiptKeyboard(),
-      })
+      await ctx.reply(
+        buildReceiptSummaryText(scan) + "\n\nHow many people are splitting this bill?",
+        { parse_mode: "Markdown" }
+      )
       return
     }
 
-    // ── State: awaiting participant count (equal split) ────────────────────────
+    // ── State: how many people? ────────────────────────────────────────────────
     if (session.state === "awaiting_participant_count") {
       const count = parseInt(text.trim(), 10)
       if (isNaN(count) || count < 2 || count > 50) {
@@ -254,99 +259,49 @@ export function createBot(token: string): Bot {
         return
       }
 
-      const scan = session.receiptScan!
-      const perPerson = parseFloat((scan.total / count).toFixed(2))
-      const currency = scan.currency ?? "€"
-
       updateSession(chatId, {
-        state: "awaiting_participants",
+        state: "collecting_handles",
         participantCount: count,
+        collectedHandles: [],
+        currentHandleIndex: 0,
       })
 
-      await ctx.reply(
-        `Each person owes *${currency}${perPerson}*.\n\n` +
-          `Please send me the Telegram handles of the ${count} participants, one per line.\n` +
-          "_Example:_\n`@alice\n@bob\n@charlie`",
-        { parse_mode: "Markdown" }
-      )
+      await ctx.reply(`Person 1 of ${count} — send their @handle:`, { parse_mode: "Markdown" })
       return
     }
 
-    // ── State: awaiting handles for item assignment ────────────────────────────
-    if (session.state === "awaiting_participants_for_items") {
-      const handles = text
-        .split(/\s+/)
-        .map((h) => h.trim())
-        .filter((h) => h.startsWith("@") || h.match(/^\w+$/))
-        .map((h) => (h.startsWith("@") ? h : `@${h}`))
+    // ── State: collecting handles one by one ───────────────────────────────────
+    if (session.state === "collecting_handles") {
+      const raw = text.trim()
+      const handle = raw.startsWith("@") ? raw : `@${raw}`
 
-      if (handles.length === 0) {
-        await ctx.reply(
-          "I didn't catch any handles. Please send @handles like:\n`@alice\n@bob`",
-          { parse_mode: "Markdown" }
-        )
+      if (!/^@\w+$/.test(handle)) {
+        await ctx.reply("That doesn't look like a valid @handle. Try again:")
         return
       }
 
-      const scan = session.receiptScan!
-      // Store handles as placeholder participants (amounts resolved after assignment)
-      const placeholderParticipants = handles.map((handle) => ({ handle, amount: 0 }))
+      const collected = [...(session.collectedHandles ?? []), handle]
+      const count = session.participantCount!
+      const nextIndex = collected.length
 
-      updateSession(chatId, {
-        state: "assigning_items",
-        participants: placeholderParticipants,
-      })
+      if (nextIndex < count) {
+        updateSession(chatId, { collectedHandles: collected, currentHandleIndex: nextIndex })
+        await ctx.reply(`Person ${nextIndex + 1} of ${count} — send their @handle:`, { parse_mode: "Markdown" })
+      } else {
+        // All handles collected — show split options
+        const scan = session.receiptScan!
+        updateSession(chatId, {
+          state: "awaiting_split_mode",
+          collectedHandles: collected,
+          currentHandleIndex: nextIndex,
+        })
 
-      await sendItemAssignmentPrompt(instance, chatId, scan, 0)
-      return
-    }
-
-    // ── State: awaiting participant handles ────────────────────────────────────
-    if (session.state === "awaiting_participants") {
-      const handles = text
-        .split(/\s+/)
-        .map((h) => h.trim())
-        .filter((h) => h.startsWith("@") || h.match(/^\w+$/))
-        .map((h) => (h.startsWith("@") ? h : `@${h}`))
-
-      if (handles.length === 0) {
+        const names = collected.map((h) => h).join(", ")
         await ctx.reply(
-          "I didn't catch any handles. Please send @handles like:\n`@alice\n@bob`",
-          { parse_mode: "Markdown" }
+          `Got everyone: ${names}\n\nHow do you want to split *${scan.merchant}*?`,
+          { parse_mode: "Markdown", reply_markup: receiptKeyboard() }
         )
-        return
       }
-
-      const scan = session.receiptScan!
-      const currency = scan.currency ?? "€"
-      const count = session.participantCount ?? handles.length
-      const perPerson = parseFloat((scan.total / count).toFixed(2))
-
-      const participants: ParticipantEntry[] = handles
-        .slice(0, count)
-        .map((handle) => ({ handle, amount: perPerson }))
-
-      updateSession(chatId, {
-        state: "confirming",
-        participants,
-      })
-
-      // Build confirmation summary
-      const lines = participants.map(
-        (p) => `• ${p.handle} — ${currency}${p.amount.toFixed(2)}`
-      )
-      const summary =
-        `Here's the split for *${scan.merchant}*:\n\n${lines.join("\n")}\n\n` +
-        `Total: *${currency}${scan.total.toFixed(2)}*`
-
-      const kb = new InlineKeyboard()
-        .text("✅ Send payment requests", "confirm_split")
-        .text("✏️ Edit", "edit_split")
-
-      await ctx.reply(summary, {
-        parse_mode: "Markdown",
-        reply_markup: kb,
-      })
       return
     }
 
@@ -385,17 +340,24 @@ export function createBot(token: string): Bot {
     if (data === "split_equal") {
       await ctx.answerCallbackQuery()
 
-      if (!session.receiptScan) {
-        await ctx.reply("Please start with /split first.")
-        return
-      }
+      const scan = session.receiptScan
+      const handles = session.collectedHandles ?? []
+      if (!scan) { await ctx.reply("Please start with /split first."); return }
 
-      updateSession(chatId, {
-        state: "awaiting_participant_count",
-        splitMode: "equal",
+      const count = handles.length
+      const currency = scan.currency ?? "€"
+      const perPerson = parseFloat((scan.total / count).toFixed(2))
+      const participants: ParticipantEntry[] = handles.map((handle) => ({ handle, amount: perPerson }))
+
+      updateSession(chatId, { state: "confirming", splitMode: "equal", participants })
+
+      const lines = participants.map((p) => `• ${p.handle} — ${currency}${p.amount.toFixed(2)}`)
+      const summary = `Here's the equal split for *${scan.merchant}*:\n\n${lines.join("\n")}\n\nTotal: *${currency}${scan.total.toFixed(2)}*`
+
+      await ctx.reply(summary, {
+        parse_mode: "Markdown",
+        reply_markup: new InlineKeyboard().text("✅ Send payment requests", "confirm_split").text("✏️ Edit", "edit_split"),
       })
-
-      await ctx.reply("How many people are splitting the bill?")
       return
     }
 
@@ -404,23 +366,19 @@ export function createBot(token: string): Bot {
       await ctx.answerCallbackQuery()
 
       const scan = session.receiptScan
-      if (!scan || scan.items.length === 0) {
-        await ctx.reply("No items found. Please try /split again.")
-        return
-      }
+      const handles = session.collectedHandles ?? []
+      if (!scan || scan.items.length === 0) { await ctx.reply("No items found. Please try /split again."); return }
 
-      // Ask for the real participants before assigning items
+      const placeholderParticipants = handles.map((handle) => ({ handle, amount: 0 }))
       updateSession(chatId, {
         splitMode: "items",
-        state: "awaiting_participants_for_items",
+        state: "assigning_items",
+        participants: placeholderParticipants,
         currentItemIndex: 0,
         itemAssignments: {},
       })
 
-      await ctx.reply(
-        "Who's at the table? Send me everyone's @handles, one per line.\n_Example:_\n`@alice\n@bob\n@charlie`",
-        { parse_mode: "Markdown" }
-      )
+      await sendItemAssignmentPrompt(instance, chatId, scan, 0)
       return
     }
 
@@ -428,13 +386,15 @@ export function createBot(token: string): Bot {
     if (data === "split_custom") {
       await ctx.answerCallbackQuery()
 
-      updateSession(chatId, {
-        state: "awaiting_participants",
-        splitMode: "custom",
-      })
+      const handles = session.collectedHandles ?? []
+      const scan = session.receiptScan!
+      const currency = scan.currency ?? "€"
+      const handleList = handles.map((h) => `${h} 0.00`).join("\n")
+
+      updateSession(chatId, { state: "awaiting_participants", splitMode: "custom" })
 
       await ctx.reply(
-        "Send me amounts for each person, one per line:\n`@alice 25.00\n@bob 30.00`",
+        `Send the amount each person owes, one per line:\n\`${handleList}\`\n\n_Edit the amounts and send back._`,
         { parse_mode: "Markdown" }
       )
       return
