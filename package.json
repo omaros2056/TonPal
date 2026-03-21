@@ -43,6 +43,12 @@
     "xrpl": "^4",
     "zod": "^3"
   },
+  "overrides": {
+    "@ensdomains/thorin": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
+  },
   "devDependencies": {
     "@playwright/test": "^1",
     "@types/node": "^20",
