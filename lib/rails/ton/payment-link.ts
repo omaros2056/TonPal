@@ -84,10 +84,12 @@ export function buildTelegramWalletLink(
   splitId: string,
   memo: string
 ): string {
-  const address =
-    process.env.TON_COLLECTION_ADDRESS ??
-    "UQDrjGwR-gN8b5wXdAqDrV5RUKnxZvbUk55rFe-8bfvb8xJt" // demo wallet
   const nanotons = tonToNano(amount).toString()
-  const comment = encodeURIComponent(`TonPal-${splitId.slice(-8)}`)
-  return `https://app.tonkeeper.com/transfer/${address}?amount=${nanotons}&text=${comment}`
+  const params = new URLSearchParams({
+    startattach: "pay",
+    amount: nanotons,
+    currency: "TON",
+    comment: `TonPal-${splitId.slice(-8)}`,
+  })
+  return `https://t.me/wallet?${params.toString()}`
 }

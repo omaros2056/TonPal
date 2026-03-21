@@ -37,12 +37,14 @@ interface Split {
 // ─── Tonkeeper link ───────────────────────────────────────────────────────────
 
 function buildPayLink(amount: number, splitId: string): string {
-  const address =
-    process.env.NEXT_PUBLIC_TON_COLLECTION_ADDRESS ??
-    "UQDrjGwR-gN8b5wXdAqDrV5RUKnxZvbUk55rFe-8bfvb8xJt"
   const nanotons = Math.round(amount * 1_000_000_000).toString()
-  const comment = encodeURIComponent(`TonPal-${splitId}`)
-  return `https://app.tonkeeper.com/transfer/${address}?amount=${nanotons}&text=${comment}`
+  const params = new URLSearchParams({
+    startattach: "pay",
+    amount: nanotons,
+    currency: "TON",
+    comment: `TonPal-${splitId}`,
+  })
+  return `https://t.me/wallet?${params.toString()}`
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────

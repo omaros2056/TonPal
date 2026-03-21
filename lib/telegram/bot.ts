@@ -143,10 +143,14 @@ export function createBot(token: string): Bot {
 
           if (entry) {
             const nanotons = Math.round(entry.amount * 1_000_000_000).toString()
-            const address = process.env.TON_COLLECTION_ADDRESS ?? "UQDrjGwR-gN8b5wXdAqDrV5RUKnxZvbUk55rFe-8bfvb8xJt"
-            const comment = encodeURIComponent(`TonPal-${splitId}`)
-            const payLink = `https://app.tonkeeper.com/transfer/${address}?amount=${nanotons}&text=${comment}`
-            const kb = new InlineKeyboard().url("💎 Pay with TON", payLink)
+            const params = new URLSearchParams({
+              startattach: "pay",
+              amount: nanotons,
+              currency: "TON",
+              comment: `TonPal-${splitId}`,
+            })
+            const payLink = `https://t.me/wallet?${params.toString()}`
+            const kb = new InlineKeyboard().url("💎 Pay with Telegram Wallet", payLink)
 
             await ctx.reply(
               `👋 Hey ${ctx.from?.first_name ?? handle}!\n\nYou owe ${b(`${split.currency}${entry.amount.toFixed(2)}`)} for ${b(split.merchant)}.\n\nTap below to pay instantly:`,
