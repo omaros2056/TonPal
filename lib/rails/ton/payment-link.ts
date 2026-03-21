@@ -13,13 +13,14 @@ export function tonToNano(ton: number): bigint {
 }
 
 /**
- * Build a TON deeplink payment URL.
+ * Build a native TON deeplink (wallet-agnostic).
+ * Opens any installed TON wallet app with pre-filled transfer.
  * Format: ton://transfer/<address>?amount=<nanotons>&text=<comment>
  */
 export function buildTonPaymentLink(params: {
   toAddress: string   // recipient TON address (raw or user-friendly)
   amountTon: number   // amount in TON (not nanotons)
-  comment?: string    // optional comment (e.g. "SatSplit: Dinner - Alice")
+  comment?: string    // optional memo
 }): string {
   const nanotons = tonToNano(params.amountTon).toString()
   const parts = [`ton://transfer/${params.toAddress}?amount=${nanotons}`]
@@ -27,6 +28,45 @@ export function buildTonPaymentLink(params: {
     parts.push(`text=${encodeURIComponent(params.comment)}`)
   }
   return parts.join("&")
+}
+
+/**
+ * Build a Tonkeeper HTTPS payment link with pre-filled recipient, amount, and memo.
+ * Works as a URL button in Telegram (no app install detection needed).
+ *
+ * For testnet: the user must have Tonkeeper in testnet mode (Settings → Dev tools).
+ * For mainnet: works out of the box.
+ *
+ * Format: https://app.tonkeeper.com/transfer/<address>?amount=<nanotons>&text=<comment>
+ */
+export function buildTonkeeperPaymentLink(params: {
+  toAddress: string   // recipient TON address
+  amountTon: number   // amount in TON (used as-is; fiat treated as TON for demo)
+  comment?: string
+}): string {
+  const nanotons = tonToNano(params.amountTon).toString()
+  const urlParams = new URLSearchParams({ amount: nanotons })
+  if (params.comment) urlParams.set("text", params.comment)
+  return `https://app.tonkeeper.com/transfer/${params.toAddress}?${urlParams.toString()}`
+}
+
+/**
+ * Build the Telegram Wallet inline payment link (mainnet only, no recipient address).
+ * Falls back to this when no TON_COLLECTION_ADDRESS is set.
+ */
+export function buildTelegramWalletLink(
+  amount: number,
+  splitId: string,
+  _memo: string
+): string {
+  const nanotons = tonToNano(amount).toString()
+  const params = new URLSearchParams({
+    startattach: "pay",
+    amount: nanotons,
+    currency: "TON",
+    comment: `TonPal-${splitId.slice(-8)}`,
+  })
+  return `https://t.me/wallet?${params.toString()}`
 }
 
 /**
@@ -69,27 +109,4 @@ export function parseSplitComment(comment: string): { splitId: string; participa
   const match = comment.match(/^SatSplit:([a-f0-9-]{8}):([a-f0-9-]{8})$/)
   if (!match) return null
   return { splitId: match[1], participantId: match[2] }
-}
-
-/**
- * Build a Tonkeeper payment link that works in group chats and any browser.
- * Opens Tonkeeper (web/app) with a pre-filled transfer to the collection address.
- * Format: https://app.tonkeeper.com/transfer/<address>?amount=<nanotons>&text=<comment>
- *
- * Set TON_COLLECTION_ADDRESS in env to your demo/collection wallet.
- * Falls back to a known testnet address if not set.
- */
-export function buildTelegramWalletLink(
-  amount: number,
-  splitId: string,
-  memo: string
-): string {
-  const nanotons = tonToNano(amount).toString()
-  const params = new URLSearchParams({
-    startattach: "pay",
-    amount: nanotons,
-    currency: "TON",
-    comment: `TonPal-${splitId.slice(-8)}`,
-  })
-  return `https://t.me/wallet?${params.toString()}`
 }

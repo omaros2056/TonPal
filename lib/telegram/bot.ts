@@ -16,7 +16,10 @@ import {
   postStatusBoard,
   toPaymentStatusEntries,
 } from "./status-board"
-import { buildTelegramWalletLink } from "@/lib/rails/ton/payment-link"
+import {
+  buildTelegramWalletLink,
+  buildTonkeeperPaymentLink,
+} from "@/lib/rails/ton/payment-link"
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://ton-pal.vercel.app"
 
@@ -166,18 +169,52 @@ export function createBot(token: string): Bot {
           )
 
           if (entry) {
-            const nanotons = Math.round(entry.amount * 1_000_000_000).toString()
-            const params = new URLSearchParams({
+            // For the demo/testnet we treat the fiat amount directly as TON.
+            // Replace TON_COLLECTION_ADDRESS in your env with your testnet wallet address.
+            const amountTon = entry.amount
+            const nanotons = Math.round(amountTon * 1_000_000_000)
+            const comment = `TonPal-${splitId.slice(-8)}`
+            const collectionAddress = process.env.TON_COLLECTION_ADDRESS ?? ""
+            const network = process.env.TON_NETWORK ?? "testnet"
+            const isTestnet = network === "testnet"
+
+            const kb = new InlineKeyboard()
+
+            if (collectionAddress) {
+              // Primary: Tonkeeper with pre-filled address + exact amount + memo
+              const tonkeeperLink = buildTonkeeperPaymentLink({
+                toAddress: collectionAddress,
+                amountTon,
+                comment,
+              })
+              kb.url("💎 Pay with Tonkeeper", tonkeeperLink).row()
+            }
+
+            // Secondary: Telegram Wallet (mainnet only, no address pre-fill)
+            const walletParams = new URLSearchParams({
               startattach: "pay",
-              amount: nanotons,
+              amount: nanotons.toString(),
               currency: "TON",
-              comment: `TonPal-${splitId}`,
+              comment,
             })
-            const payLink = `https://t.me/wallet?${params.toString()}`
-            const kb = new InlineKeyboard().url("💎 Pay with Telegram Wallet", payLink)
+            kb.url("💰 Telegram Wallet", `https://t.me/wallet?${walletParams.toString()}`)
+
+            // Address display: show first 6 + last 4 chars
+            const addrDisplay = collectionAddress
+              ? `\n📍 To: ${code(collectionAddress.slice(0, 6) + "…" + collectionAddress.slice(-4))}`
+              : ""
+
+            const testnetNote = isTestnet
+              ? `\n\n${i("⚠️ Testnet — use Tonkeeper in testnet mode (Settings → Dev tools)")}`
+              : ""
 
             await ctx.reply(
-              `👋 Hey ${ctx.from?.first_name ?? handle}!\n\nYou owe ${b(`${split.currency}${entry.amount.toFixed(2)}`)} for ${b(split.merchant)}.\n\nTap below to pay instantly:`,
+              `👋 Hey ${ctx.from?.first_name ?? handle}!\n\n` +
+              `You owe ${b(`${amountTon.toFixed(2)} TON`)} ` +
+              `(${split.currency}${entry.amount.toFixed(2)}) for ${b(split.merchant)}.` +
+              addrDisplay +
+              testnetNote +
+              `\n\nTap below to pay:`,
               { ...HTML, reply_markup: kb }
             )
             return
