@@ -176,10 +176,11 @@ export function createBot(token: string): Bot {
 
   // ── /tonpal — main entry point ───────────────────────────────────────────────
   instance.command("tonpal", async (ctx) => {
-    const miniAppUrl = `${APP_URL}/miniapp`
-    const kb = new InlineKeyboard().webApp("🧾 Open TonPal", miniAppUrl)
+    const chatId = ctx.chat.id
+    await setSession(chatId, { state: "awaiting_receipt" })
+    const kb = new InlineKeyboard().text("🧾 Split a bill", "feature_split")
     await ctx.reply(
-      `👋 Welcome to ${b("TonPal")}!\n\nTap below to scan a receipt and split the bill with your group.`,
+      `💼 ${b("TonPal")} — What do you want to do?`,
       { ...HTML, reply_markup: kb }
     )
   })
