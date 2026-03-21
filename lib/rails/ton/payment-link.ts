@@ -72,26 +72,22 @@ export function parseSplitComment(comment: string): { splitId: string; participa
 }
 
 /**
- * Build a Telegram Wallet payment link.
- * Opens the @wallet bot in Telegram with a pre-filled payment request.
- * Format: https://t.me/wallet?startattach=pay&amount={amount}&currency=TON&comment=SatSplit-{splitId}
+ * Build a Tonkeeper payment link that works in group chats and any browser.
+ * Opens Tonkeeper (web/app) with a pre-filled transfer to the collection address.
+ * Format: https://app.tonkeeper.com/transfer/<address>?amount=<nanotons>&text=<comment>
  *
- * Note: `amount` here is in TON (the wallet bot interprets the amount field).
+ * Set TON_COLLECTION_ADDRESS in env to your demo/collection wallet.
+ * Falls back to a known testnet address if not set.
  */
 export function buildTelegramWalletLink(
   amount: number,
   splitId: string,
   memo: string
 ): string {
-  const params = new URLSearchParams({
-    startattach: "pay",
-    amount: String(amount),
-    currency: "TON",
-    comment: `SatSplit-${splitId}`,
-  })
-  // memo is appended as extra context (non-standard, for logging/display)
-  if (memo) {
-    params.set("text", memo)
-  }
-  return `https://t.me/wallet?${params.toString()}`
+  const address =
+    process.env.TON_COLLECTION_ADDRESS ??
+    "UQDrjGwR-gN8b5wXdAqDrV5RUKnxZvbUk55rFe-8bfvb8xJt" // demo wallet
+  const nanotons = tonToNano(amount).toString()
+  const comment = encodeURIComponent(`TonPal-${splitId.slice(-8)}`)
+  return `https://app.tonkeeper.com/transfer/${address}?amount=${nanotons}&text=${comment}`
 }
