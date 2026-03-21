@@ -136,5 +136,6 @@ export function xrpToDropsStr(xrp: number): string {
 
 // Convert drops to XRP (returns number)
 export function dropsToXrpNum(drops: string): number {
-  return parseFloat(dropsToXrp(drops))
+  const result = dropsToXrp(drops)
+  return typeof result === "number" ? result : parseFloat(result)
 }
