@@ -1,11 +1,13 @@
 import logging
 import threading
+import os
+from dotenv import load_dotenv, dotenv_values 
 from flask import Flask, render_template_string
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
 # --- CONFIGURATION ---
-TOKEN = '8610517852:AAESLYbR9y4-X_GTGHjkdZPkFUc4s0jyBAM'
+TOKEN = os.getenv("NGROK_KEY")
 WEB_APP_URL = "https://precontractive-acidifiable-launa.ngrok-free.dev/gui"
 
 app = Flask(__name__)
