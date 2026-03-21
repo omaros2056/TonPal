@@ -477,16 +477,35 @@ export function createBot(token: string): Bot {
         paymentEntries
       )
 
+      // Save split to DB so the deep link can look it up
+      try {
+        const { createClient } = await import("@supabase/supabase-js")
+        const db = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        )
+        await db.from("tonpal_splits").insert({
+          id: splitId,
+          data: {
+            merchant: scan.merchant,
+            currency,
+            total: scan.total,
+            splits: participants.map((p) => ({ handle: p.handle, amount: p.amount })),
+          },
+        })
+      } catch (err) {
+        console.error("[bot] Failed to save split to DB:", err)
+      }
+
       await updateSession(chatId, { splitSessionId: splitId, statusMessageId: statusMsgId })
 
-      // Post individual payment links in the group — one per person
+      const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
+
+      // Post one message per person with a deep link to their private payment chat
       for (const p of participants) {
-        const walletLink = buildTelegramWalletLink(
-          p.amount,
-          splitId,
-          `${p.handle} owes for ${scan.merchant}`
-        )
-        const kb = new InlineKeyboard().url("💎 Pay with TON Wallet", walletLink)
+        const rawHandle = p.handle.replace(/^@/, "")
+        const deepLink = `https://t.me/${botUsername}?start=pay_${splitId}_${rawHandle}`
+        const kb = new InlineKeyboard().url("💎 Tap to pay", deepLink)
         await instance.api.sendMessage(
           chatId,
           `${p.handle} — you owe ${b(`${currency}${p.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
