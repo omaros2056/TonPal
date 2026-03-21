@@ -21,7 +21,7 @@ export function renderStatusBoard(
   payments: PaymentStatusEntry[]
 ): string {
   const lines: string[] = [
-    `📊 *${merchant}* — ${currency}${total.toFixed(2)}`,
+    `📊 <b>${merchant}</b> — ${currency}${total.toFixed(2)}`,
     "",
   ]
 
@@ -73,7 +73,7 @@ export async function postStatusBoard(
   const reply_markup = buildStatusBoardKeyboard(payments)
 
   const msg = await bot.api.sendMessage(chatId, text, {
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup,
   })
 
@@ -106,7 +106,7 @@ export async function updateStatusBoard(
   const reply_markup = buildStatusBoardKeyboard(payments)
 
   await bot.api.editMessageText(chatId, messageId, text, {
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup,
   })
 }
