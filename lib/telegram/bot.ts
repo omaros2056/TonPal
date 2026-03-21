@@ -147,11 +147,10 @@ async function sendPaymentDM(
     const tonkeeperLink = buildTonkeeperPaymentLink({ toAddress, amountTon, comment })
     kb.url("💎 Pay with Tonkeeper", tonkeeperLink)
 
-    // TON Space (Telegram's built-in wallet) — only works reliably on mainnet.
-    if (!isTestnet) {
-      const tonSpaceLink = `https://t.me/wallet?startapp=transfer_${toAddress}_${nanotons}`
-      kb.row().url("💬 Pay with Telegram Wallet", tonSpaceLink)
-    }
+    // TON Space (Telegram's built-in wallet).
+    // For testnet: enable testnet mode in Telegram Wallet → Settings → Dev tools.
+    const tonSpaceLink = `https://t.me/wallet?startapp=transfer_${toAddress}_${nanotons}`
+    kb.row().url("💬 Pay with Telegram Wallet", tonSpaceLink)
   } else {
     // No address set — open Telegram Wallet home so user can still initiate a transfer manually
     kb.url("💬 Open Telegram Wallet", "https://t.me/wallet")
