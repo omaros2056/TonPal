@@ -3,6 +3,7 @@
 
 import { Bot, webhookCallback, InlineKeyboard } from "grammy"
 import type { ReceiptScan } from "@/types"
+import { parseReceipt as parseReceiptAI } from "@/lib/ai/parse"
 import {
   getSession,
   setSession,
@@ -90,29 +91,11 @@ async function parseReceipt(
   fileId: string | null,
   text: string | null
 ): Promise<ReceiptScan> {
-  try {
-    let body: Record<string, string>
-    if (fileId) {
-      const imageBase64 = await fetchFileAsBase64(fileId)
-      body = { imageBase64 }
-    } else {
-      body = { text: text ?? "" }
-    }
-    const res = await fetch(`${APP_URL}/api/receipts/parse`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.error ?? `Parse API returned ${res.status}`)
-    }
-    const json = await res.json()
-    if (!json.success) throw new Error(json.error ?? "Parse API returned success=false")
-    return json.data as ReceiptScan
-  } catch (err) {
-    throw new Error(`Receipt parsing failed: ${err instanceof Error ? err.message : String(err)}`)
+  if (fileId) {
+    const imageBase64 = await fetchFileAsBase64(fileId)
+    return parseReceiptAI({ imageBase64 })
   }
+  return parseReceiptAI({ text: text ?? "" })
 }
 
 // ─── Reply helpers ────────────────────────────────────────────────────────────

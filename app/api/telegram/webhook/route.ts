@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { handleWebhook } from "@/lib/telegram/bot"
 
+// Extend timeout to 60s — Gemini vision + image download can take 15-30s
+export const maxDuration = 60
+
 // Always return 200 to Telegram — even on error — to prevent retry storms.
 // grammy's webhookCallback handles both `message` and `callback_query` update
 // types transparently; no special routing is needed here.
