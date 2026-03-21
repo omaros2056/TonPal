@@ -70,3 +70,28 @@ export function parseSplitComment(comment: string): { splitId: string; participa
   if (!match) return null
   return { splitId: match[1], participantId: match[2] }
 }
+
+/**
+ * Build a Telegram Wallet payment link.
+ * Opens the @wallet bot in Telegram with a pre-filled payment request.
+ * Format: https://t.me/wallet?startattach=pay&amount={amount}&currency=TON&comment=SatSplit-{splitId}
+ *
+ * Note: `amount` here is in TON (the wallet bot interprets the amount field).
+ */
+export function buildTelegramWalletLink(
+  amount: number,
+  splitId: string,
+  memo: string
+): string {
+  const params = new URLSearchParams({
+    startattach: "pay",
+    amount: String(amount),
+    currency: "TON",
+    comment: `SatSplit-${splitId}`,
+  })
+  // memo is appended as extra context (non-standard, for logging/display)
+  if (memo) {
+    params.set("text", memo)
+  }
+  return `https://t.me/wallet?${params.toString()}`
+}
