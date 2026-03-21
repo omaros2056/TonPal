@@ -370,6 +370,153 @@ export function createBot(token: string): Bot {
     }
   })
 
+  // ── /checkpayments — poll blockchain for confirmed payments ─────────────────
+  instance.command("checkpayments", async (ctx) => {
+    const chatId = ctx.chat.id
+    const session = await getSession(chatId)
+    const splitId = session.splitSessionId
+
+    if (!splitId || session.state !== "split_active") {
+      await ctx.reply("No active split to check. Confirm a split first.", HTML)
+      return
+    }
+
+    const checkingMsg = await ctx.reply(
+      `🔍 ${i("Checking the TON blockchain for payments...")}`,
+      HTML
+    )
+
+    try {
+      const db = await getDb()
+      const { data: row } = await db
+        .from("tonpal_splits")
+        .select("data")
+        .eq("id", splitId)
+        .single()
+
+      if (!row?.data) {
+        await ctx.reply("Couldn't find split data.")
+        return
+      }
+
+      type SplitEntry = {
+        handle: string
+        amount: number
+        paid: boolean
+        tx_hash: string | null
+      }
+      const splitData = row.data as {
+        merchant: string
+        currency: string
+        total: number
+        organizer_wallet: string
+        splits: SplitEntry[]
+      }
+
+      const wallet = splitData.organizer_wallet
+      if (!wallet) {
+        await ctx.reply("No organizer wallet set for this split.")
+        return
+      }
+
+      // Poll TON Center for incoming transactions to the organizer's wallet
+      const isTestnet = (process.env.TON_NETWORK ?? "testnet") === "testnet"
+      const tonBase = isTestnet
+        ? "https://testnet.toncenter.com/api/v2"
+        : "https://toncenter.com/api/v2"
+
+      const txRes = await fetch(
+        `${tonBase}/getTransactions?address=${encodeURIComponent(wallet)}&limit=50`,
+        { cache: "no-store" }
+      )
+      const txData = await txRes.json()
+      const txs: Array<{
+        in_msg?: { source?: string; value?: string; message?: string }
+        transaction_id?: { hash?: string }
+      }> = txData.result ?? []
+
+      // The memo we're looking for
+      const expectedComment = `TonPal-${splitId.slice(-8)}`
+
+      // Find matching incoming transactions
+      const matchingTxs = txs.filter((tx) => {
+        const msg = tx.in_msg
+        if (!msg?.value || !msg?.message) return false
+        return msg.message.includes(expectedComment)
+      })
+
+      // Match transactions to unpaid participants by amount
+      const newlyPaid: Array<{ handle: string; amount: number; txHash: string }> = []
+
+      for (const tx of matchingTxs) {
+        const nanotons = BigInt(tx.in_msg?.value ?? "0")
+        const amountTon = Number(nanotons) / 1_000_000_000
+        const txHash = tx.transaction_id?.hash ?? ""
+
+        // Find an unpaid participant whose amount matches (within 0.01 tolerance)
+        const match = splitData.splits.find(
+          (s) =>
+            !s.paid &&
+            !newlyPaid.some((p) => p.handle === s.handle) &&
+            Math.abs(s.amount - amountTon) < 0.01
+        )
+
+        if (match) {
+          match.paid = true
+          match.tx_hash = txHash
+          newlyPaid.push({ handle: match.handle, amount: match.amount, txHash })
+        }
+      }
+
+      // Save updated paid statuses to DB
+      if (newlyPaid.length > 0) {
+        await db
+          .from("tonpal_splits")
+          .update({ data: splitData })
+          .eq("id", splitId)
+      }
+
+      // Delete the "checking..." message
+      await ctx.api.deleteMessage(chatId, checkingMsg.message_id).catch(() => {})
+
+      // Report results
+      const totalPaid = splitData.splits.filter((s) => s.paid).length
+      const totalParticipants = splitData.splits.length
+      const currency = splitData.currency ?? "€"
+
+      if (newlyPaid.length > 0) {
+        const paidLines = newlyPaid.map(
+          (p) => `✅ ${p.handle} paid ${b(`${p.amount.toFixed(2)} TON`)}`
+        )
+        await ctx.reply(
+          `🎉 ${b("New payments detected!")} — ${b(splitData.merchant)}\n\n` +
+          `${paidLines.join("\n")}\n\n` +
+          `📊 ${b(`${totalPaid}/${totalParticipants}`)} payments confirmed` +
+          (totalPaid === totalParticipants
+            ? `\n\n🏆 ${b("All payments received!")} This split is fully settled.`
+            : ""),
+          HTML
+        )
+      } else {
+        const pendingHandles = splitData.splits
+          .filter((s) => !s.paid)
+          .map((s) => s.handle)
+          .join(", ")
+        await ctx.reply(
+          `📊 ${b(splitData.merchant)} — ${b(`${totalPaid}/${totalParticipants}`)} paid\n\n` +
+          (totalPaid === totalParticipants
+            ? `🏆 ${b("All settled!")}`
+            : `⏳ Still waiting for: ${pendingHandles}`),
+          HTML
+        )
+      }
+    } catch (err) {
+      console.error("[bot] checkpayments error:", err)
+      await ctx.api.deleteMessage(chatId, checkingMsg.message_id).catch(() => {})
+      await ctx.reply("Error checking payments. Please try again.")
+    }
+  })
+
   // ── /tonpal — main entry point ───────────────────────────────────────────────
   instance.command("tonpal", async (ctx) => {
     const chatId = ctx.chat.id
@@ -712,7 +859,7 @@ export function createBot(token: string): Bot {
         return
       }
 
-      // Save split to DB so the deep link can look it up
+      // Save split to DB — includes chat_id for group notifications and paid tracking
       try {
         const db = await getDb()
         await db.from("tonpal_splits").insert({
@@ -722,7 +869,13 @@ export function createBot(token: string): Bot {
             currency,
             total: scan.total,
             organizer_wallet: organizerWallet,
-            splits: participants.map((p) => ({ handle: p.handle, amount: p.amount })),
+            chat_id: chatId,
+            splits: participants.map((p) => ({
+              handle: p.handle,
+              amount: p.amount,
+              paid: false,
+              tx_hash: null,
+            })),
           },
         })
       } catch (err) {
