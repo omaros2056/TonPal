@@ -6,10 +6,10 @@ import { createServerSupabaseClient } from "@/lib/supabase/server"
 // Returns: { status, checkId, txHash?, xummSigned }
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const paymentRequestId = params.id
+    const { id: paymentRequestId } = await params
     if (!paymentRequestId) {
       return NextResponse.json(
         { success: false, error: "Missing paymentRequestId" },

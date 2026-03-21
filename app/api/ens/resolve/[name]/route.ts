@@ -6,9 +6,10 @@ export const revalidate = 300
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { name: string } }
+  { params }: { params: Promise<{ name: string }> }
 ) {
-  const name = decodeURIComponent(params.name)
+  const { name: rawName } = await params
+  const name = decodeURIComponent(rawName)
 
   if (!isValidEnsName(name)) {
     return NextResponse.json(

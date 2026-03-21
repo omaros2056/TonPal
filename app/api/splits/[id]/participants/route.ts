@@ -29,10 +29,10 @@ type AddParticipantsResponse = {
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<ApiResponse<AddParticipantsResponse>>> {
   try {
-    const splitId = params.id
+    const { id: splitId } = await params
     const body = await req.json()
     const inputs: ParticipantInput[] = body.participants ?? []
 

@@ -11,10 +11,10 @@ type StatusResponse = {
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<ApiResponse<StatusResponse>>> {
   try {
-    const { id } = params
+    const { id } = await params
     const supabase = await createServerSupabaseClient()
 
     // Fetch split session
