@@ -313,18 +313,64 @@ export function createBot(token: string): Bot {
       const db = await getDb()
       await db.from("user_wallets").upsert({
         user_id: userId,
+        username: ctx.from?.username ?? null,
         ton_address: address,
         updated_at: new Date().toISOString(),
       })
       const short = `${address.slice(0, 6)}…${address.slice(-4)}`
+      const nameDisplay = ctx.from?.username ? ` for @${ctx.from.username}` : ""
       await ctx.reply(
-        `✅ ${b("Wallet saved!")} ${code(short)}\n\n` +
-        `When you confirm a bill split, everyone's payments will go directly to this address.`,
+        `✅ ${b("Wallet saved")}${nameDisplay}!\n\n` +
+        `📍 ${code(short)}\n\n` +
+        `Every time you confirm a split, payments will go directly to this address. ` +
+        `Use /mywallet anytime to check or update it.`,
         HTML
       )
     } catch (err) {
       console.error("[bot] Failed to save wallet:", err)
       await ctx.reply("Sorry, couldn't save your wallet. Please try again.")
+    }
+  })
+
+  // ── /mywallet — view or update registered wallet ─────────────────────────────
+  instance.command("mywallet", async (ctx) => {
+    const userId = ctx.from?.id
+    if (!userId) return
+
+    try {
+      const db = await getDb()
+      const { data } = await db
+        .from("user_wallets")
+        .select("ton_address, username, updated_at")
+        .eq("user_id", userId)
+        .single()
+
+      if (!data?.ton_address) {
+        await ctx.reply(
+          `💼 You haven't registered a wallet yet.\n\n` +
+          `Use:\n${code("/setwallet YOUR_TON_ADDRESS")}\n\n` +
+          `${i("Your address starts with EQ, UQ, or kQ — copy it from Tonkeeper or any TON wallet.")}`,
+          HTML
+        )
+        return
+      }
+
+      const addr = data.ton_address as string
+      const short = `${addr.slice(0, 6)}…${addr.slice(-4)}`
+      const updatedAt = new Date(data.updated_at as string).toLocaleDateString("en-GB", {
+        day: "numeric", month: "short", year: "numeric",
+      })
+
+      await ctx.reply(
+        `💼 ${b("Your registered wallet")}\n\n` +
+        `📍 ${code(addr)}\n\n` +
+        `Saved on: ${i(updatedAt)}\n\n` +
+        `To change it, send:\n${code("/setwallet NEW_TON_ADDRESS")}`,
+        HTML
+      )
+    } catch (err) {
+      console.error("[bot] mywallet error:", err)
+      await ctx.reply("Couldn't look up your wallet. Please try again.")
     }
   })
 
