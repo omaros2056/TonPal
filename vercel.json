@@ -7,7 +7,7 @@
   "crons": [
     {
       "path": "/api/payments/confirm",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 9 * * *"
     }
   ],
   "env": {
