@@ -106,44 +106,62 @@ function buildReceiptSummaryText(scan: ReceiptScan): string {
   )
 }
 
+// ─── TON address validator ────────────────────────────────────────────────────
+// User-friendly TON addresses: 48 base64url chars, start with EQ / UQ / kQ / kf
+function isValidTonAddress(address: string): boolean {
+  return /^[EUk][Qq0-9][A-Za-z0-9_-]{46}$/.test(address)
+}
+
+// ─── Supabase helpers (shared) ────────────────────────────────────────────────
+async function getDb() {
+  const { createClient } = await import("@supabase/supabase-js")
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
+
 // ─── Private payment DM helper ───────────────────────────────────────────────
-// Sends the payment buttons with pre-filled amount to whoever clicked the link.
-// Called from both the universal split_ deep link and (future) remind flows.
+// organizerWallet: the address registered by whoever created the split.
+// Falls back to TON_COLLECTION_ADDRESS env var if the organizer hasn't set one.
 async function sendPaymentDM(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ctx: any,
   split: { merchant: string; currency: string; total: number },
   entry: { amount: number },
-  splitId: string
+  splitId: string,
+  organizerWallet?: string
 ): Promise<void> {
   const amountTon = entry.amount   // fiat treated as TON for demo/testnet
   const nanotons = Math.round(amountTon * 1_000_000_000)
   const comment = `TonPal-${splitId.slice(-8)}`
-  const collectionAddress = process.env.TON_COLLECTION_ADDRESS ?? ""
+  const toAddress = organizerWallet || process.env.TON_COLLECTION_ADDRESS || ""
   const isTestnet = (process.env.TON_NETWORK ?? "testnet") === "testnet"
 
   const kb = new InlineKeyboard()
 
-  if (collectionAddress) {
-    const tonkeeperLink = buildTonkeeperPaymentLink({
-      toAddress: collectionAddress,
-      amountTon,
+  if (toAddress) {
+    // Tonkeeper HTTPS link — works as a URL button, opens with address + amount + memo prefilled
+    const tonkeeperLink = buildTonkeeperPaymentLink({ toAddress, amountTon, comment })
+    kb.url("💎 Pay with Tonkeeper", tonkeeperLink).row()
+
+    // ton:// universal deeplink — opens Telegram Wallet (or any TON wallet) with everything prefilled
+    const tonDeepLink = `ton://transfer/${toAddress}?amount=${nanotons}&text=${encodeURIComponent(comment)}`
+    kb.url("💰 Pay with TON Wallet", tonDeepLink)
+  } else {
+    // Fallback: Telegram Wallet without address (mainnet only)
+    const walletParams = new URLSearchParams({
+      startattach: "pay",
+      amount: nanotons.toString(),
+      currency: "TON",
       comment,
     })
-    kb.url("💎 Pay with Tonkeeper", tonkeeperLink).row()
+    kb.url("💰 Telegram Wallet", `https://t.me/wallet?${walletParams.toString()}`)
   }
 
-  const walletParams = new URLSearchParams({
-    startattach: "pay",
-    amount: nanotons.toString(),
-    currency: "TON",
-    comment,
-  })
-  kb.url("💰 Telegram Wallet", `https://t.me/wallet?${walletParams.toString()}`)
-
-  const addrDisplay = collectionAddress
-    ? `\n📍 To: ${code(collectionAddress.slice(0, 6) + "…" + collectionAddress.slice(-4))}`
-    : ""
+  const addrDisplay = toAddress
+    ? `\n📍 To: ${code(toAddress.slice(0, 6) + "…" + toAddress.slice(-4))}`
+    : `\n⚠️ ${i("No wallet address set — organizer hasn't registered a wallet yet.")}`
 
   const testnetNote = isTestnet
     ? `\n\n${i("⚠️ Testnet — switch Tonkeeper to testnet mode (Settings → Dev tools)")}`
@@ -224,6 +242,7 @@ export function createBot(token: string): Bot {
             merchant: string
             currency: string
             total: number
+            organizer_wallet?: string
             splits: { handle: string; amount: number }[]
           }
 
@@ -243,8 +262,8 @@ export function createBot(token: string): Bot {
             return
           }
 
-          // Build payment buttons with pre-filled amount
-          await sendPaymentDM(ctx, split, entry, splitId)
+          // Build payment buttons — pays directly to the organizer's wallet
+          await sendPaymentDM(ctx, split, entry, splitId, split.organizer_wallet)
           return
         }
       } catch (err) {
@@ -260,6 +279,53 @@ export function createBot(token: string): Bot {
       `👋 Hey ${firstName}! I'm ${b("TonPal")} — your group expense assistant.\n\nUse /tonpal to get started.`,
       HTML
     )
+  })
+
+  // ── /setwallet — register the organizer's TON receive address ───────────────
+  instance.command("setwallet", async (ctx) => {
+    const address = (ctx.match ?? "").trim()
+
+    if (!address) {
+      await ctx.reply(
+        `💼 Register your TON wallet so TonPal knows where to send payments.\n\n` +
+        `Usage:\n${code("/setwallet YOUR_TON_ADDRESS")}\n\n` +
+        `Example:\n${code("/setwallet EQD4FPq-PRDieyQKkizFTRtSDyucUIqrj0v_zXJmqaDp6_0t")}\n\n` +
+        `${i("Your address starts with EQ, UQ, or kQ and is 48 characters long.")}`,
+        HTML
+      )
+      return
+    }
+
+    if (!isValidTonAddress(address)) {
+      await ctx.reply(
+        `❌ That doesn't look like a valid TON address.\n\n` +
+        `It should start with ${code("EQ")}, ${code("UQ")}, or ${code("kQ")} and be 48 characters long.\n\n` +
+        `${i("You can copy it from Tonkeeper or any TON wallet app.")}`,
+        HTML
+      )
+      return
+    }
+
+    const userId = ctx.from?.id
+    if (!userId) return
+
+    try {
+      const db = await getDb()
+      await db.from("user_wallets").upsert({
+        user_id: userId,
+        ton_address: address,
+        updated_at: new Date().toISOString(),
+      })
+      const short = `${address.slice(0, 6)}…${address.slice(-4)}`
+      await ctx.reply(
+        `✅ ${b("Wallet saved!")} ${code(short)}\n\n` +
+        `When you confirm a bill split, everyone's payments will go directly to this address.`,
+        HTML
+      )
+    } catch (err) {
+      console.error("[bot] Failed to save wallet:", err)
+      await ctx.reply("Sorry, couldn't save your wallet. Please try again.")
+    }
   })
 
   // ── /tonpal — main entry point ───────────────────────────────────────────────
@@ -578,19 +644,42 @@ export function createBot(token: string): Bot {
         paymentEntries
       )
 
+      // Look up the organizer's registered TON wallet (fallback to env var)
+      let organizerWallet = process.env.TON_COLLECTION_ADDRESS ?? ""
+      const organizerUserId = ctx.from?.id
+      if (organizerUserId) {
+        try {
+          const db = await getDb()
+          const { data: walletData } = await db
+            .from("user_wallets")
+            .select("ton_address")
+            .eq("user_id", organizerUserId)
+            .single()
+          if (walletData?.ton_address) organizerWallet = walletData.ton_address
+        } catch {
+          // Wallet not found — use env fallback
+        }
+      }
+
+      if (!organizerWallet) {
+        await ctx.reply(
+          `⚠️ ${b("No wallet set.")} Register your TON address first so people know where to pay:\n\n` +
+          `${code("/setwallet YOUR_TON_ADDRESS")}`,
+          HTML
+        )
+        return
+      }
+
       // Save split to DB so the deep link can look it up
       try {
-        const { createClient } = await import("@supabase/supabase-js")
-        const db = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        )
+        const db = await getDb()
         await db.from("tonpal_splits").insert({
           id: splitId,
           data: {
             merchant: scan.merchant,
             currency,
             total: scan.total,
+            organizer_wallet: organizerWallet,
             splits: participants.map((p) => ({ handle: p.handle, amount: p.amount })),
           },
         })
