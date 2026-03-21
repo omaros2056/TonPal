@@ -147,12 +147,6 @@ export function createBot(token: string): Bot {
     )
   })
 
-  // ── /split — shortcut alias ──────────────────────────────────────────────────
-  instance.command("split", async (ctx) => {
-    const chatId = ctx.chat.id
-    setSession(chatId, { state: "awaiting_receipt" })
-    await ctx.reply("📸 Send me a receipt photo or describe the bill.", { parse_mode: "Markdown" })
-  })
 
   // ── Photo messages ───────────────────────────────────────────────────────────
   instance.on("message:photo", async (ctx) => {
