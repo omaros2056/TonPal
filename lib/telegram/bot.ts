@@ -736,20 +736,26 @@ export function createBot(token: string): Bot {
         statusMessageId: statusMsgId,
       })
 
-      // Mini App pay button — opens /miniapp/pay/{splitId} inside Telegram.
-      // The page reads the user's Telegram identity from initDataUnsafe and shows
-      // only their share. Each participant gets their own public message for
-      // social accountability, but the same Mini App URL handles everyone.
-      const payUrl = `${APP_URL}/miniapp/pay/${splitId}`
-      const payKb = new InlineKeyboard().webApp("💎 Pay now", payUrl)
+      // Single universal message — lists everyone's share, one button for all.
+      // Opens the Mini App via t.me deep link; the page reads the user's Telegram
+      // identity from initDataUnsafe.start_param + initDataUnsafe.user.username.
+      const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
+      const appShortName = process.env.NEXT_PUBLIC_MINIAPP_SHORT_NAME ?? "app"
+      const payUrl = `https://t.me/${botUsername}/${appShortName}?startapp=${splitId}`
+      const payKb = new InlineKeyboard().url("💎 Pay now", payUrl)
 
-      for (const p of participants) {
-        await instance.api.sendMessage(
-          chatId,
-          `${p.handle} — you owe ${b(`${currency}${p.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
-          { ...HTML, reply_markup: payKb }
-        )
-      }
+      const lines = participants.map(
+        (p) => `• ${p.handle} — ${currency}${p.amount.toFixed(2)}`
+      )
+
+      await instance.api.sendMessage(
+        chatId,
+        `✅ ${b("Split confirmed!")} — ${b(scan.merchant)}\n\n` +
+        `${lines.join("\n")}\n\n` +
+        `Total: ${b(`${currency}${scan.total.toFixed(2)}`)}\n\n` +
+        `Tap below to view your share and pay:`,
+        { ...HTML, reply_markup: payKb }
+      )
       return
     }
 
@@ -822,8 +828,10 @@ export function createBot(token: string): Bot {
       }
 
       const currency = scan.currency ?? "€"
-      const payUrl = `${APP_URL}/miniapp/pay/${splitId}`
-      const kb = new InlineKeyboard().webApp("💎 Pay now", payUrl)
+      const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "satsplittestbot"
+      const appShortName = process.env.NEXT_PUBLIC_MINIAPP_SHORT_NAME ?? "app"
+      const payUrl = `https://t.me/${botUsername}/${appShortName}?startapp=${splitId}`
+      const kb = new InlineKeyboard().url("💎 Pay now", payUrl)
       await ctx.reply(
         `🔔 ${b("Reminder:")} ${handle} — you still owe ${b(`${currency}${participant.amount.toFixed(2)}`)} for ${b(scan.merchant)}`,
         { ...HTML, reply_markup: kb }
