@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
-import { buildTonPaymentLink, buildSplitComment, tonToNano } from "@/lib/rails/ton/payment-link"
+import { buildTonkeeperPaymentLink, buildSplitComment } from "@/lib/rails/ton/payment-link"
 import { equalSplit } from "@/lib/split/engine"
 import type { ApiResponse, Participant, PaymentRequest } from "@/types"
 
@@ -133,7 +133,7 @@ export async function POST(
         // Estimate TON amount — use a placeholder rate if not specified.
         // The actual rate conversion (fiat → TON) is left to the caller or a future task.
         // We store amount_native = null when rate is unknown.
-        const paymentLink = buildTonPaymentLink({
+        const paymentLink = buildTonkeeperPaymentLink({
           toAddress: receiverAddress,
           amountTon: 0, // placeholder — real conversion handled separately
           comment,

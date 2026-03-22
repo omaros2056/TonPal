@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerSupabaseClient } from "@/lib/supabase/server"
 import { calculateEqualSplit, calculateItemizedSplit, equalSplit } from "@/lib/split/engine"
-import { buildTonPaymentLink, buildSplitComment } from "@/lib/rails/ton/payment-link"
+import { buildTonkeeperPaymentLink, buildSplitComment } from "@/lib/rails/ton/payment-link"
 import type { ApiResponse, SplitSession, Participant, PaymentRequest, ReceiptItem } from "@/types"
 
 type CreateSplitBody = {
@@ -176,7 +176,7 @@ export async function POST(
       // Placeholder: 1 TON ≈ 5 EUR/USD for demo — real conversion would use an oracle
       const amountTon = amount / 5
 
-      const paymentLink = buildTonPaymentLink({
+      const paymentLink = buildTonkeeperPaymentLink({
         toAddress,
         amountTon,
         comment,
