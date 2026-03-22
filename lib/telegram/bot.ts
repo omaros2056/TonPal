@@ -19,6 +19,7 @@ import {
 import {
   buildTelegramWalletLink,
   buildTonkeeperPaymentLink,
+  parseJettonNotification,
 } from "@/lib/rails/ton/payment-link"
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://ton-pal.vercel.app"
@@ -133,8 +134,9 @@ async function sendPaymentDM(
   splitId: string,
   organizerWallet?: string
 ): Promise<void> {
-  const amountTon = entry.amount   // fiat treated as TON for demo/testnet
-  const nanotons = Math.round(amountTon * 1_000_000_000)
+  const amountMusd = entry.amount   // fiat amount = mUSD amount (1:1 with USD)
+  const jettonMaster = process.env.NEXT_PUBLIC_MUSD_JETTON_MASTER ?? process.env.MUSD_JETTON_MASTER ?? ""
+  const atomicAmount = Math.round(amountMusd * 1_000_000) // mUSD has 6 decimals
   const comment = `TonPal-${splitId.slice(-8)}`
   const toAddress = organizerWallet || process.env.TON_COLLECTION_ADDRESS || ""
   const isTestnet = (process.env.TON_NETWORK ?? "testnet") === "testnet"
@@ -142,13 +144,14 @@ async function sendPaymentDM(
   const kb = new InlineKeyboard()
 
   if (toAddress) {
-    // Tonkeeper HTTPS link — opens Tonkeeper directly with address + amount + memo prefilled.
-    // Requires Tonkeeper installed; for testnet enable Settings → Dev tools → Switch to testnet.
-    const tonkeeperLink = buildTonkeeperPaymentLink({ toAddress, amountTon, comment })
+    // Tonkeeper HTTPS link — opens Tonkeeper with mUSD Jetton + amount + memo prefilled.
+    const tonkeeperLink = buildTonkeeperPaymentLink({ toAddress, amountTon: amountMusd, comment })
     kb.url("💎 Pay with Tonkeeper", tonkeeperLink)
 
-    // Tonhub HTTPS link — second wallet option, same prefill format as Tonkeeper.
-    const tonhubLink = `https://tonhub.com/transfer/${toAddress}?amount=${nanotons}&text=${encodeURIComponent(comment)}`
+    // Tonhub HTTPS link — add jetton param if master address is configured.
+    const tonhubParams = new URLSearchParams({ amount: String(atomicAmount), text: comment })
+    if (jettonMaster) tonhubParams.set("jetton", jettonMaster)
+    const tonhubLink = `https://tonhub.com/transfer/${toAddress}?${tonhubParams.toString()}`
     kb.row().url("🔵 Pay with Tonhub", tonhubLink)
   } else {
     // No address set — open Telegram Wallet home so user can still initiate a transfer manually
@@ -165,7 +168,7 @@ async function sendPaymentDM(
 
   await ctx.reply(
     `👋 Hey ${ctx.from?.first_name ?? "there"}!\n\n` +
-    `You owe ${b(`${amountTon.toFixed(2)} TON`)} ` +
+    `You owe ${b(`${amountMusd.toFixed(2)} mUSD`)} ` +
     `(${split.currency}${entry.amount.toFixed(2)}) for ${b(split.merchant)}.` +
     addrDisplay +
     testnetNote +
@@ -431,34 +434,53 @@ export function createBot(token: string): Bot {
       )
       const txData = await txRes.json()
       const txs: Array<{
-        in_msg?: { source?: string; value?: string; message?: string }
+        in_msg?: {
+          source?: string
+          value?: string
+          message?: string
+          msg_data?: { type?: string; body?: string; text?: string }
+        }
         transaction_id?: { hash?: string }
       }> = txData.result ?? []
 
       // The memo we're looking for
       const expectedComment = `TonPal-${splitId.slice(-8)}`
 
-      // Find matching incoming transactions
+      // Find matching incoming Jetton transfer_notification transactions
       const matchingTxs = txs.filter((tx) => {
         const msg = tx.in_msg
-        if (!msg?.value || !msg?.message) return false
-        return msg.message.includes(expectedComment)
+        if (!msg) return false
+        // Jetton notification with binary body
+        if (msg.msg_data?.type === "msg.dataRaw" && msg.msg_data.body) {
+          const parsed = parseJettonNotification(msg.msg_data.body)
+          return parsed?.comment?.includes(expectedComment) ?? false
+        }
+        // Fallback: plain text comment
+        return msg.message?.includes(expectedComment) ?? false
       })
 
-      // Match transactions to unpaid participants by amount
+      // Match transactions to unpaid participants by mUSD amount
       const newlyPaid: Array<{ handle: string; amount: number; txHash: string }> = []
 
       for (const tx of matchingTxs) {
-        const nanotons = BigInt(tx.in_msg?.value ?? "0")
-        const amountTon = Number(nanotons) / 1_000_000_000
+        const msg = tx.in_msg
         const txHash = tx.transaction_id?.hash ?? ""
+
+        let amountMusd: number
+        if (msg?.msg_data?.type === "msg.dataRaw" && msg.msg_data.body) {
+          const parsed = parseJettonNotification(msg.msg_data.body)
+          amountMusd = parsed?.amountMusd ?? 0
+        } else {
+          // Legacy fallback for native TON transfers
+          amountMusd = Number(BigInt(msg?.value ?? "0")) / 1_000_000_000
+        }
 
         // Find an unpaid participant whose amount matches (within 0.01 tolerance)
         const match = splitData.splits.find(
           (s) =>
             !s.paid &&
             !newlyPaid.some((p) => p.handle === s.handle) &&
-            Math.abs(s.amount - amountTon) < 0.01
+            Math.abs(s.amount - amountMusd) < 0.01
         )
 
         if (match) {
@@ -486,7 +508,7 @@ export function createBot(token: string): Bot {
 
       if (newlyPaid.length > 0) {
         const paidLines = newlyPaid.map(
-          (p) => `✅ ${p.handle} paid ${b(`${p.amount.toFixed(2)} TON`)}`
+          (p) => `✅ ${p.handle} paid ${b(`${p.amount.toFixed(2)} mUSD`)}`
         )
         await ctx.reply(
           `🎉 ${b("New payments detected!")} — ${b(splitData.merchant)}\n\n` +

@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { parseJettonNotification } from "@/lib/rails/ton/payment-link"
 
 /**
  * GET /api/cron/poll-payments
  *
- * Vercel cron job — polls the TON blockchain for incoming payments to each
- * active split's organizer wallet. When a matching transaction is found
- * (by TonPal-XXXXXXXX memo), marks the participant as paid and sends a
- * Telegram notification to the group chat.
+ * Vercel cron job — polls the TON blockchain for incoming mUSD Jetton payments
+ * to each active split's organizer wallet. Detects Jetton transfer_notification
+ * messages, matches them by TonPal-XXXXXXXX memo, marks participants as paid,
+ * and sends a Telegram notification to the group chat.
  *
- * Triggered every minute via vercel.json cron config.
+ * Triggered daily via vercel.json cron config.
  */
 export async function GET(req: Request) {
   // Verify cron secret (Vercel sets this header for cron invocations)
@@ -68,10 +69,15 @@ export async function GET(req: Request) {
     const unpaid = splitData.splits.filter((s) => !s.paid)
     if (unpaid.length === 0) continue
 
-    // Poll organizer wallet
+    // Poll organizer's TON wallet for incoming Jetton transfer_notification messages
     const expectedComment = `TonPal-${splitId.slice(-8)}`
     let txs: Array<{
-      in_msg?: { source?: string; value?: string; message?: string }
+      in_msg?: {
+        source?: string
+        value?: string
+        message?: string
+        msg_data?: { type?: string; body?: string; text?: string }
+      }
       transaction_id?: { hash?: string }
     }> = []
 
@@ -86,25 +92,44 @@ export async function GET(req: Request) {
       continue
     }
 
-    // Match transactions
+    // Match Jetton transfer_notification transactions by comment
+    // The organizer's wallet receives an internal notification from their Jetton wallet
+    // with a transfer_notification body containing the mUSD amount and forward_payload (comment).
     const matchingTxs = txs.filter((tx) => {
       const msg = tx.in_msg
-      if (!msg?.value || !msg?.message) return false
-      return msg.message.includes(expectedComment)
+      if (!msg) return false
+
+      // Case 1: Jetton notification with binary body — parse it
+      if (msg.msg_data?.type === "msg.dataRaw" && msg.msg_data.body) {
+        const parsed = parseJettonNotification(msg.msg_data.body)
+        return parsed?.comment?.includes(expectedComment) ?? false
+      }
+
+      // Case 2: Fallback — plain text comment (legacy / test transfers)
+      return msg.message?.includes(expectedComment) ?? false
     })
 
     const newlyPaid: Array<{ handle: string; amount: number }> = []
 
     for (const tx of matchingTxs) {
-      const nanotons = BigInt(tx.in_msg?.value ?? "0")
-      const amountTon = Number(nanotons) / 1_000_000_000
+      const msg = tx.in_msg
       const txHash = tx.transaction_id?.hash ?? ""
+
+      let amountMusd: number
+
+      if (msg?.msg_data?.type === "msg.dataRaw" && msg.msg_data.body) {
+        const parsed = parseJettonNotification(msg.msg_data.body)
+        amountMusd = parsed?.amountMusd ?? 0
+      } else {
+        // Fallback: treat value as nanotons for legacy native TON transfers
+        amountMusd = Number(BigInt(msg?.value ?? "0")) / 1_000_000_000
+      }
 
       const match = splitData.splits.find(
         (s) =>
           !s.paid &&
           !newlyPaid.some((p) => p.handle === s.handle) &&
-          Math.abs(s.amount - amountTon) < 0.01
+          Math.abs(s.amount - amountMusd) < 0.01
       )
 
       if (match) {
@@ -128,7 +153,7 @@ export async function GET(req: Request) {
     const totalPaidCount = splitData.splits.filter((s) => s.paid).length
     const totalParticipants = splitData.splits.length
     const paidLines = newlyPaid.map(
-      (p) => `✅ ${p.handle} paid <b>${p.amount.toFixed(2)} TON</b>`
+      (p) => `✅ ${p.handle} paid <b>${p.amount.toFixed(2)} mUSD</b>`
     )
 
     let message =

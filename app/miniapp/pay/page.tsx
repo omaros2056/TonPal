@@ -29,20 +29,69 @@ type Status =
   | "done"
   | "error"
 
-// ─── Comment payload (BOC) ────────────────────────────────────────────────────
+// ─── Jetton transfer payload (BOC) ────────────────────────────────────────────
+// Builds a Jetton transfer (op 0xf8a7ea5) cell encoded as base64 BOC.
+// Sends mUSD from the connected wallet to the organizer's wallet.
 
-function buildCommentPayload(comment: string): string | undefined {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { beginCell } = require("ton-core")
-    return (beginCell()
-      .storeUint(0, 32)
-      .storeStringTail(comment)
-      .endCell()
-      .toBoc() as Buffer)
-      .toString("base64")
-  } catch {
-    return undefined
+async function buildJettonTransferPayload(params: {
+  senderAddress: string
+  recipientAddress: string
+  amountMusd: number
+  comment: string
+  tonBase: string
+  jettonMaster: string
+}): Promise<{ senderJettonWallet: string; payload: string; gasTon: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { beginCell, Address, toNano, Cell } = require("ton-core")
+
+  // 1. Resolve sender's Jetton wallet from master contract
+  const addrCell = beginCell().storeAddress(Address.parse(params.senderAddress)).endCell()
+  const addrBoc = (addrCell.toBoc() as Buffer).toString("base64")
+
+  const walletRes = await fetch(`${params.tonBase}/runGetMethod`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      address: params.jettonMaster,
+      method: "get_wallet_address",
+      stack: [["tvm.Slice", addrBoc]],
+    }),
+  })
+  const walletData = await walletRes.json()
+  const cellBoc = walletData.result?.stack?.[0]?.[1]?.bytes
+  if (!cellBoc) throw new Error("Could not resolve mUSD Jetton wallet address")
+
+  const senderJettonWallet = (Cell.fromBase64(cellBoc) as ReturnType<typeof Cell.fromBase64>)
+    .beginParse()
+    .loadAddress()
+    .toString({ bounceable: true })
+
+  // 2. Build Jetton transfer message body
+  const jettonAmount = BigInt(Math.round(params.amountMusd * 1_000_000)) // 6 decimals
+
+  const forwardPayload = beginCell()
+    .storeUint(0, 32)
+    .storeStringTail(params.comment)
+    .endCell()
+
+  const payload = (beginCell()
+    .storeUint(0xf8a7ea5, 32)                           // transfer op
+    .storeUint(0, 64)                                    // query_id
+    .storeCoins(jettonAmount)                            // mUSD amount
+    .storeAddress(Address.parse(params.recipientAddress)) // destination
+    .storeAddress(Address.parse(params.senderAddress))    // response_destination
+    .storeBit(0)                                          // no custom payload
+    .storeCoins(toNano("0.05"))                          // forward_ton_amount
+    .storeBit(1)                                          // forward_payload as ref
+    .storeRef(forwardPayload)
+    .endCell()
+    .toBoc() as Buffer)
+    .toString("base64")
+
+  return {
+    senderJettonWallet,
+    payload,
+    gasTon: String(Math.round(0.12 * 1_000_000_000)), // 0.12 TON for gas
   }
 }
 
@@ -122,24 +171,43 @@ function PayInner({ splitId }: { splitId: string }) {
     load()
   }, [username, splitId])
 
-  // Step 3 — send the transaction via TON Connect
+  // Step 3 — send mUSD Jetton transfer via TON Connect
   async function handlePay() {
-    if (!split?.organizer_wallet || !entry) return
+    if (!split?.organizer_wallet || !entry || !userAddress) return
     setStatus("paying")
     setErrorMsg(null)
 
-    const nanotons = String(Math.round(entry.amount * 1_000_000_000))
+    const jettonMaster = process.env.NEXT_PUBLIC_MUSD_JETTON_MASTER
+    if (!jettonMaster) {
+      setStatus("error")
+      setErrorMsg("mUSD Jetton master address not configured.")
+      return
+    }
+
+    const tonBase =
+      process.env.NEXT_PUBLIC_TON_NETWORK === "mainnet"
+        ? "https://toncenter.com/api/v2"
+        : "https://testnet.toncenter.com/api/v2"
+
     const comment = `TonPal-${splitId.slice(-8)}`
-    const payload = buildCommentPayload(comment)
 
     try {
+      const { senderJettonWallet, payload, gasTon } = await buildJettonTransferPayload({
+        senderAddress: userAddress,
+        recipientAddress: split.organizer_wallet,
+        amountMusd: entry.amount,
+        comment,
+        tonBase,
+        jettonMaster,
+      })
+
       await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 600,
         messages: [
           {
-            address: split.organizer_wallet,
-            amount: nanotons,
-            ...(payload ? { payload } : {}),
+            address: senderJettonWallet, // send to SENDER's Jetton wallet
+            amount: gasTon,              // TON for gas
+            payload,                     // Jetton transfer instruction
           },
         ],
       })
@@ -223,7 +291,7 @@ function PayInner({ splitId }: { splitId: string }) {
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Your share</p>
           <p className="text-4xl font-extrabold text-blue-600 mt-2 tabular-nums">
             {entry?.amount.toFixed(2)}
-            <span className="text-xl font-semibold text-blue-400 ml-1">TON</span>
+            <span className="text-xl font-semibold text-blue-400 ml-1">mUSD</span>
           </p>
           <p className="text-sm text-gray-400 mt-1">
             ≈ {split?.currency}{entry?.amount.toFixed(2)}
@@ -254,7 +322,7 @@ function PayInner({ splitId }: { splitId: string }) {
             onClick={handlePay}
             className="w-full py-4 rounded-2xl bg-blue-500 text-white font-bold text-base shadow-md active:scale-95 transition-transform mt-2"
           >
-            Send {entry?.amount.toFixed(2)} TON
+            Send {entry?.amount.toFixed(2)} mUSD
           </button>
         )}
 
